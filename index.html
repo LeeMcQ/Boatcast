@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boatcast — live slides to every phone, no internet</title>
+<meta name="description" content="Send live slides and words from one phone or laptop to many phones over Wi-Fi. No internet, no router.">
+<link rel="icon" href="web/icon-192.png">
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --ink:#e8eaee; --quiet:#9aa1ad; --line:#2a2f3a; --accent:#4f9dff; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --card:#fff; --ink:#15181e; --quiet:#5b6370; --line:#e1e4ea; --accent:#1f6fe0; }
+  }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--ink); font:17px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  main { max-width:620px; margin:0 auto; padding:28px 18px 48px; }
+  header { display:flex; align-items:center; gap:14px; }
+  header img { width:56px; height:56px; border-radius:14px; }
+  h1 { font-size:28px; margin:0; }
+  .tag { color:var(--quiet); margin:14px 0 22px; }
+  .btn { display:block; text-align:center; background:var(--accent); color:#fff; text-decoration:none;
+         font-weight:600; font-size:19px; padding:16px; border-radius:12px; }
+  .note { font-size:14px; color:var(--quiet); text-align:center; margin:8px 0 0; }
+  .warn { display:none; background:#3a2e10; color:#ffd88a; border-radius:10px; padding:10px 12px; font-size:15px; margin-top:12px; }
+  @media (prefers-color-scheme: light) { .warn { background:#fff4d6; color:#7a5400; } }
+  section { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px; margin-top:18px; }
+  h2 { font-size:19px; margin:0 0 8px; }
+  ol { margin:0; padding-left:22px; } li { margin:6px 0; }
+  .small { font-size:15px; color:var(--quiet); }
+  .links a { display:block; padding:10px 0; border-top:1px solid var(--line); color:var(--accent); text-decoration:none; }
+  .links a:first-child { border-top:0; }
+  footer { margin-top:26px; font-size:14px; color:var(--quiet); text-align:center; }
+  footer a { color:var(--quiet); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="web/icon-192.png" alt="">
+    <h1>Boatcast</h1>
+  </header>
+  <p class="tag">Live slides and words from one phone or laptop to every phone in the room. No internet, no router. Viewers only need a browser.</p>
+
+  <a class="btn" href="https://github.com/LeeMcQ/Boatcast/releases/latest/download/boatcast.apk">Install the Android app</a>
+  <p class="note">Android 8 or newer. Allow "install unknown apps" when asked.</p>
+  <p class="warn" id="warn">The first release isn't published yet, so this download won't work until it is.</p>
+
+  <section>
+    <h2>1 · Host</h2>
+    <ol>
+      <li>Open Boatcast and tap <b>Host</b>. Allow Location (Android needs it to start a hotspot).</li>
+      <li>Show the two codes on screen. People scan the <b>Wi-Fi code</b>, then the <b>page code</b>.</li>
+      <li>Change slides from the console. Tap <b>Pick slides</b> for your own images or text.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>2 · Watch</h2>
+    <ol>
+      <li>Scan the Wi-Fi code, then the page code. Nothing to install.</li>
+      <li>Page won't open? Turn mobile data off.</li>
+    </ol>
+    <p class="small">iPhones and Android phones both work.</p>
+  </section>
+
+  <section>
+    <h2>3 · More than 10 phones: repeaters</h2>
+    <ol>
+      <li>On another Android phone, scan the host's Wi-Fi code and turn mobile data off.</li>
+      <li>Open Boatcast and tap <b>Repeater</b>. About 10 more phones join this phone using its own codes.</li>
+      <li>Repeaters can chain: about 10 → 100 → 1,000 phones.</li>
+    </ol>
+    <p class="small">The repeater phone must keep Wi-Fi on while its hotspot runs (most recent Android phones can; the app checks). iPhones can watch but can't repeat.</p>
+  </section>
+
+  <section>
+    <h2>Using a laptop instead</h2>
+    <div class="links">
+      <a href="https://github.com/LeeMcQ/Boatcast/releases/latest/download/boatcast-tls-x86_64-pc-windows-msvc.exe">Windows</a>
+      <a href="https://github.com/LeeMcQ/Boatcast/releases/latest/download/boatcast-tls-aarch64-apple-darwin">macOS (Apple silicon)</a>
+      <a href="https://github.com/LeeMcQ/Boatcast/releases/latest/download/boatcast-tls-x86_64-unknown-linux-gnu">Linux</a>
+      <a href="https://github.com/LeeMcQ/Boatcast/releases/latest">All downloads (Termux, Raspberry Pi, routers)</a>
+    </div>
+    <p class="small">Run it, turn on the laptop's hotspot, then open <code>http://localhost:8080/console.html</code>. Setup details are in the <a href="https://github.com/LeeMcQ/Boatcast#readme">guide</a>.</p>
+  </section>
+
+  <footer>
+    Tested on an Android emulator; try 3–5 real phones before your event.<br>
+    <a href="https://github.com/LeeMcQ/Boatcast">Source code and full guide on GitHub</a>
+  </footer>
+</main>
+<script>
+  // Show a note while no release exists yet.
+  fetch('https://api.github.com/repos/LeeMcQ/Boatcast/releases/latest')
+    .then(function (r) { if (r.status === 404) document.getElementById('warn').style.display = 'block'; })
+    .catch(function () {});
+</script>
+</body>
+</html>
