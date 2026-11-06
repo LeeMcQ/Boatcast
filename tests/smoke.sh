@@ -22,6 +22,7 @@ etag=$(echo "$hdr" | awk -F': ' 'tolower($1)=="etag"{print $2}' | tr -d '\r')
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $etag" $H/)
 check "unchanged viewer returns 304" '[[ "$code" == 304 ]]'
 check "console page served"        '[[ $(curl -s -o /dev/null -w "%{http_code}" $H/console) == 200 ]]'
+check "console.html served (the app opens this)" '[[ $(curl -s $H/console.html) == *"Presenter console"* ]]'
 check "manifest + service worker"  '[[ $(curl -s $H/manifest.webmanifest) == *standalone* && $(curl -s $H/sw.js) == *respondWith* ]]'
 
 # Deck and assets
@@ -81,6 +82,18 @@ sleep 0.5
 check "host change reaches relay viewers" 'grep -q "\"slide\":2" /tmp/sc-rev.txt'
 check "relay refuses control (409)"  '[[ $(curl -s -o /dev/null -w "%{http_code}" -X POST $R/control -d "{\"action\":\"next\"}") == 409 ]]'
 check "relay status shows upstream connected" '[[ $(curl -s $R/status) == *"\"connected\":true"* ]]'
+check "host is depth 0, relay depth 1 (mesh)" '[[ $(curl -s $H/status) == *"\"depth\":0"* && $(curl -s $R/status) == *"\"depth\":1"* ]]'
+check "host counts the relay as a child repeater" '[[ $(curl -s $H/status) == *"\"relays\":1"* ]]'
+# Mesh re-parenting: a second host; the app switches the relay to it without a restart.
+$BIN --port 18082 --mesh-id 77 >/tmp/sc-host2.log 2>&1 &
+sleep 0.6
+check "LAN cannot switch a relay's upstream" '[[ $(curl -s -o /dev/null -w "%{http_code}" -X POST http://$LANIP:18081/control -d "{\"action\":\"upstream\",\"url\":\"http://127.0.0.1:18082\"}") == 403 ]]'
+check "app switches relay upstream (200)" '[[ $(curl -s -o /dev/null -w "%{http_code}" -X POST $R/control -d "{\"action\":\"upstream\",\"url\":\"http://127.0.0.1:18082\"}") == 200 ]]'
+sleep 1.5
+check "relay follows the new upstream and its deck" '[[ $(curl -s $R/status) == *"\"connected\":true,\"url\":\"http://127.0.0.1:18082\""* && "$(curl -s $R/deck.json)" == "$(curl -s http://127.0.0.1:18082/deck.json)" ]]'
+check "relay inherits the new mesh id" '[[ $(curl -s $R/status) == *"\"mesh\":77"* ]]'
+pkill -f "boatcast --port 18082" ; sleep 1.5
+check "relay cut off from its host reports no depth (loop guard)" '[[ $(curl -s $R/status) == *"\"depth\":null"* ]]'
 
 # Captive portal answers
 $BIN --port 18090 --captive >/tmp/sc-cap.log 2>&1 &

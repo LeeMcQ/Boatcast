@@ -24,6 +24,7 @@ fn web() -> &'static HashMap<&'static str, Asset> {
         let viewer = asset("text/html; charset=utf-8", include_str!("../web/index.html"));
         m.insert("/", viewer);
         m.insert("/console", asset("text/html; charset=utf-8", include_str!("../web/console.html")));
+        m.insert("/console.html", asset("text/html; charset=utf-8", include_str!("../web/console.html")));
         m.insert("/sw.js", asset("text/javascript; charset=utf-8", include_str!("../web/sw.js")));
         m.insert("/manifest.webmanifest", asset("application/manifest+json", include_str!("../web/manifest.webmanifest")));
         m.insert("/icon.svg", asset("image/svg+xml", include_str!("../web/icon.svg")));
@@ -48,10 +49,11 @@ where
         };
         first = false;
         if req.method == "GET" && req.path == "/events" && !foreign_host(&hub, &req) {
+            let is_relay = req.header("x-boatcast-relay").is_some();
             // Free the request buffers: a phone may hold this stream for hours.
             drop(req);
             drop(buf);
-            return sse(hub, stream, peer).await;
+            return sse(hub, stream, peer, is_relay).await;
         }
         match route(&hub, &req, &mut stream, peer).await {
             Ok(true) if !req.wants_close() => continue,
@@ -61,18 +63,24 @@ where
 }
 
 /// One phone's live stream: policy, snapshot, then every state change and a keepalive.
-async fn sse<S>(hub: Arc<Hub>, stream: S, peer: SocketAddr)
+async fn sse<S>(hub: Arc<Hub>, stream: S, peer: SocketAddr, is_relay: bool)
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    struct Count(Arc<Hub>);
+    struct Count(Arc<Hub>, bool);
     impl Drop for Count {
         fn drop(&mut self) {
             self.0.clients.fetch_sub(1, SeqCst);
+            if self.1 {
+                self.0.relays.fetch_sub(1, SeqCst);
+            }
         }
     }
     let n = hub.clients.fetch_add(1, SeqCst) + 1;
-    let _count = Count(hub.clone());
+    if is_relay {
+        hub.relays.fetch_add(1, SeqCst);
+    }
+    let _count = Count(hub.clone(), is_relay);
     let (mut rd, mut wr) = tokio::io::split(stream);
     if n > hub.cfg.max_clients {
         let _ = respond(&mut wr, 503, &[("Retry-After", String::from("10"))], b"full", false).await;
@@ -261,6 +269,19 @@ pub async fn route<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, req: &Request, w: &mut
             return send_json(w, 403, &json!({"error": "pin required"})).await;
         }
         if hub.cfg.relay {
+            // The only thing a relay takes: a new upstream, from the app on the same phone.
+            if body["action"] == "upstream" && is_loopback(&peer) {
+                return match body["url"].as_str().map(crate::config::parse_upstream) {
+                    Some(Ok(up)) => {
+                        eprintln!("relay: switching upstream to http://{}:{}/", up.0, up.1);
+                        *hub.upstream.lock().unwrap() = Some(up);
+                        hub.upstream_changed.notify_one();
+                        send_json(w, 200, &json!({"ok": true})).await
+                    }
+                    Some(Err(e)) => send_json(w, 400, &json!({"error": e})).await,
+                    None => send_json(w, 400, &json!({"error": "upstream needs \"url\""})).await,
+                };
+            }
             return send_json(w, 409, &json!({"error": "this is a relay; control the show from the host console"})).await;
         }
         return match hub.control(&body) {
@@ -311,7 +332,10 @@ fn status(hub: &Hub, req: &Request, peer: &SocketAddr) -> Value {
         "url": hub.cfg.page_url(),
         "ssid": hub.cfg.wifi_ssid,
         "wifi_qr": hub.cfg.wifi_ssid.is_some(),
-        "upstream": hub.cfg.upstream_url.as_ref().map(|u| json!({"url": u, "connected": hub.upstream_ok.load(SeqCst)})),
+        "upstream": hub.upstream.lock().unwrap().as_ref().map(|(h, p)| json!({"url": format!("http://{h}:{p}"), "connected": hub.upstream_ok.load(SeqCst)})),
+        "depth": match hub.depth.load(SeqCst) { u32::MAX => Value::Null, d => json!(d) },
+        "mesh": hub.mesh.load(SeqCst),
+        "relays": hub.relays.load(SeqCst),
         "policy": {"preload": p.preload, "spread_ms": p.spread_ms, "retry_ms": p.retry_ms},
         "threads": hub.cfg.threads,
         "auth": auth,

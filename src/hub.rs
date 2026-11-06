@@ -8,7 +8,7 @@ use std::{
     net::IpAddr,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst},
+        atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering::SeqCst},
     },
     time::{Duration, Instant},
 };
@@ -38,6 +38,16 @@ pub struct Hub {
     pub joined: Mutex<HashSet<IpAddr>>,
     pub started: Instant,
     pub upstream_ok: AtomicBool,
+    /// Relay: the boatcast we follow. The phone app can change it at runtime (mesh re-parenting).
+    pub upstream: Mutex<Option<(String, u16)>>,
+    /// Woken when `upstream` changes so the relay drops the old link at once.
+    pub upstream_changed: tokio::sync::Notify,
+    /// Hops from the host (host = 0); relays learn it from their upstream's /status.
+    pub depth: AtomicU32,
+    /// Mesh id: chosen by the host, inherited by relays; lets phones tell meshes apart.
+    pub mesh: AtomicU32,
+    /// Live streams opened by other relays (child repeaters), a subset of `clients`.
+    pub relays: AtomicUsize,
 }
 
 pub struct Policy {
@@ -68,6 +78,7 @@ impl Hub {
         let first = event_bytes(0, &state_json(&show));
         let (tx, _) = watch::channel(first);
         let (tick, _) = watch::channel(0u64);
+        let (cfg_upstream, relay, mesh_id) = (cfg.upstream.clone(), cfg.relay, cfg.mesh_id.unwrap_or(0) as u32);
         let hub = Arc::new(Hub {
             cfg,
             show: Mutex::new(show),
@@ -79,6 +90,11 @@ impl Hub {
             joined: Mutex::new(HashSet::new()),
             started: Instant::now(),
             upstream_ok: AtomicBool::new(false),
+            upstream: Mutex::new(cfg_upstream),
+            upstream_changed: tokio::sync::Notify::new(),
+            depth: AtomicU32::new(if relay { u32::MAX } else { 0 }),
+            mesh: AtomicU32::new(mesh_id),
+            relays: AtomicUsize::new(0),
         });
         let h = hub.clone();
         tokio::spawn(async move {

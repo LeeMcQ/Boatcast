@@ -70,10 +70,10 @@ sleep 4
 adb shell pidof "$PKG" >/dev/null || fail "app died on start"
 adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
 adb pull /sdcard/ui.xml /tmp/ui.xml >/dev/null 2>&1
-for b in Host Repeater "Pick slides" Stop; do
+for b in Host Join "Pick slides" Stop; do
   grep -q "text=\"$b\"" /tmp/ui.xml || fail "button '$b' missing"
 done
-pass "app starts with Host, Repeater, Pick slides, Stop"
+pass "app starts with Host, Join, Pick slides, Stop"
 sleep 1
 if adb logcat -d -s boatcast | grep -q "self-check ok"; then
   pass "the app can run its bundled server"
@@ -102,4 +102,28 @@ if curl -s -m 3 localhost:18090/status >/tmp/app.json && grep -q boatcast /tmp/a
 else
   echo "INFO: no app server on :8080 (the emulator may not support local-only hotspots; see status above)"
 fi
+curl -s -m 3 localhost:18090/console.html | grep -q "Presenter console" || fail "the console page the app opens is missing"
+pass "console page the app opens is served"
+if grep -q "Presenter console\|Live now\|LIVE NOW" /tmp/ui2.xml; then
+  pass "the app shows the presenter console"
+else
+  echo "INFO: console text not visible in the UI dump (WebView accessibility may be off)"
+fi
+
+# 4. Stop, then Join: must not crash even with no host or Bluetooth around.
+read -r x1 y1 x2 y2 < <(grep -o 'text="Stop"[^>]*' /tmp/ui2.xml | grep -o 'bounds="[^"]*"' | head -1 | tr -c '0-9\n' ' ')
+adb shell input tap $(( (x1 + x2) / 2 )) $(( (y1 + y2) / 2 ))
+sleep 3
+adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+adb pull /sdcard/ui.xml /tmp/ui3.xml >/dev/null 2>&1
+read -r x1 y1 x2 y2 < <(grep -o 'text="Join"[^>]*' /tmp/ui3.xml | grep -o 'bounds="[^"]*"' | head -1 | tr -c '0-9\n' ' ')
+adb shell input tap $(( (x1 + x2) / 2 )) $(( (y1 + y2) / 2 ))
+sleep 12
+adb shell pidof "$PKG" >/dev/null || fail "app died after tapping Join"
+if adb logcat -d | grep -A12 "FATAL EXCEPTION" | grep -q "$PKG"; then fail "crash in Join mode"; fi
+pass "Join mode runs without crashing"
+adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+adb pull /sdcard/ui.xml /tmp/ui4.xml >/dev/null 2>&1
+echo "---- Join status:"; grep -o 'text="[^"]*Boatcast[^"]*"\|text="[^"]*Looking[^"]*"\|text="[^"]*Bluetooth[^"]*"' /tmp/ui4.xml | head -3
+adb logcat -d -s boatcast | grep "mesh:" | tail -10
 echo "---- all hard checks passed"

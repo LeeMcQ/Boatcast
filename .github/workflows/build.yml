@@ -102,6 +102,23 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+      - name: Mesh rules and simulation (unit tests)
+        run: gradle -p android testReleaseUnitTest --no-daemon
+      - name: Release signing key (GitHub secrets)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          mkdir -p dist
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "BOATCAST_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "BOATCAST_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "Signing with the release key from secrets."
+          else
+            echo "::warning::No ANDROID_KEYSTORE_B64 / ANDROID_KEYSTORE_PASSWORD secrets: this APK uses a throwaway key and will not be published."
+            touch dist/THROWAWAY-KEY
+          fi
       - run: gradle -p android assembleRelease --no-daemon
       - run: cp android/app/build/outputs/apk/release/app-release.apk dist/boatcast.apk
       - name: Check the APK
@@ -149,6 +166,12 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Refuse to publish an APK signed with a throwaway key
+        run: |
+          if [ -e dist/THROWAWAY-KEY ]; then
+            echo "::error::Add the ANDROID_KEYSTORE_B64 and ANDROID_KEYSTORE_PASSWORD secrets (Settings, Secrets and variables, Actions), then publish the release again."
+            exit 1
+          fi
       - run: ls -l dist
       - uses: softprops/action-gh-release@v2
         with:

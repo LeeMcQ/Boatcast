@@ -15,19 +15,49 @@ use std::{
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 pub async fn run(hub: Arc<Hub>) {
-    let (host, port) = hub.cfg.upstream.clone().expect("relay needs upstream");
     let mut backoff = Duration::from_millis(500);
     loop {
-        match follow(&hub, &host, port).await {
-            Ok(()) => eprintln!("relay: upstream closed the stream"),
-            Err(e) => eprintln!("relay: {e}"),
+        let (host, port) = hub.upstream.lock().unwrap().clone().expect("relay needs upstream");
+        // A new upstream from the app (mesh re-parenting) drops the old link at once.
+        let switched = tokio::select! {
+            r = follow(&hub, &host, port) => {
+                match r {
+                    Ok(()) => eprintln!("relay: upstream closed the stream"),
+                    Err(e) => eprintln!("relay: {e}"),
+                }
+                false
+            }
+            _ = hub.upstream_changed.notified() => true,
+        };
+        // Cut off from the host: report no depth, so no phone below us is picked as our parent.
+        hub.depth.store(u32::MAX, SeqCst);
+        if hub.upstream_ok.swap(false, SeqCst) || switched {
+            backoff = Duration::from_millis(500); // had a good session, or a fresh upstream: retry quickly
         }
-        if hub.upstream_ok.swap(false, SeqCst) {
-            backoff = Duration::from_millis(500); // we had a good session; retry quickly
+        if switched {
+            continue;
         }
         let jitter = Duration::from_millis((crate::deck::fnv(&std::process::id().to_le_bytes()) % 400) as u64);
-        tokio::time::sleep(backoff + jitter).await;
+        tokio::select! {
+            _ = tokio::time::sleep(backoff + jitter) => {}
+            _ = hub.upstream_changed.notified() => { backoff = Duration::from_millis(500); continue; }
+        }
         backoff = (backoff * 2).min(Duration::from_secs(8));
+    }
+}
+
+/// Learn our place in the mesh from the upstream: depth + 1 and its mesh id.
+async fn learn_depth(hub: &Arc<Hub>, host: &str, port: u16) {
+    if let Ok((200, body)) = http::get(host, port, "/status").await {
+        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) {
+            match v["depth"].as_u64() {
+                Some(d) => hub.depth.store(d as u32 + 1, SeqCst),
+                None => hub.depth.store(u32::MAX, SeqCst), // our upstream is cut off too
+            }
+            if let Some(m) = v["mesh"].as_u64() {
+                hub.mesh.store(m as u32, SeqCst);
+            }
+        }
     }
 }
 
@@ -53,6 +83,7 @@ async fn follow(hub: &Arc<Hub>, host: &str, port: u16) -> io::Result<()> {
     }
     hub.upstream_ok.store(true, SeqCst);
     eprintln!("relay: following http://{host}:{port}/");
+    learn_depth(hub, host, port).await;
     let (mut event, mut data) = (String::new(), String::new());
     loop {
         line.clear();
@@ -65,6 +96,9 @@ async fn follow(hub: &Arc<Hub>, host: &str, port: u16) -> io::Result<()> {
         }
         let l = line.trim_end_matches(['\r', '\n']);
         if l.is_empty() {
+            if event == "ping" {
+                learn_depth(hub, host, port).await; // depth can change when an ancestor re-parents
+            }
             if event == "state" && !data.is_empty() {
                 on_state(hub, host, port, &data).await;
             }

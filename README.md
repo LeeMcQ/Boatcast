@@ -4,7 +4,7 @@ Live slides and words from one phone or laptop to many phones over Wi-Fi. There'
 
 - **Host**: one small Rust program, 1.1 MB. It runs on a laptop, in an Android app, in Termux, or on a router.
 - **Viewers**: any phone browser. A slide change reaches every phone in under 50 ms at 5,000 phones in a lab test. On real Wi-Fi it's typically 0.1–0.3 s.
-- **More than 10 phones**: a phone's hotspot takes about 10. Android phones can act as **repeaters**, each adding about 10 more, and repeaters can chain.
+- **More than 10 phones**: a phone's hotspot takes about 10. In **Join** mode, Android phones with the app build a **mesh** by themselves: each finds the best nearby host or repeater, joins it, and becomes a repeater when phones nearby need a way in. The mesh re-arranges itself when phones leave or run low on battery.
 
 ```
                  Host phone or laptop  (boatcast serve)
@@ -40,6 +40,31 @@ How many phones a laptop hotspot takes depends on the system:
 
 On either one, add repeaters for more phones.
 
+## Join mode: the self-building mesh
+
+Tap **Join** on any Android phone with the app. With no codes to scan, the phone:
+
+1. **Finds the show.** Hosts and repeaters announce themselves over Bluetooth LE: mesh, depth (hops from the host), room left and battery. It also uses the Wi-Fi it's already on, if you scanned a code.
+2. **Picks the best way in.** Fewest hops first, then the most room, then the strongest signal, avoiding phones with low battery.
+3. **Joins by itself.** It reads that hotspot's Wi-Fi name and password over a short Bluetooth connection, joins it, and shows the slides.
+4. **Repeats when useful.** If phones nearby are still looking, or fewer than two repeaters with room are in reach, it starts its own hotspot and relays. This needs a phone that can keep Wi-Fi and hotspot on together, battery at 30% or more (or charging), and mobile data off.
+5. **Keeps adjusting** every 4 seconds:
+    - If its parent stops answering, it moves to the next best one.
+    - If a clearly better parent appears, it moves, at most once a minute.
+    - Below 20% battery it stops repeating, and its phones move elsewhere.
+    - Idle repeaters stand down when there are plenty nearby.
+
+**No loops.** A repeater that loses its link to the host stops advertising and reports no depth, and so does everything below it. It then rejoins a node that still has a path to the host.
+
+**Tested so far.** The rules are unit-tested, and a simulation checks rooms of 100, 150, 200 and 1,000 phones. Every phone connects, no hotspot goes over 8 phones, there are no loops, and the mesh heals when repeaters leave or run low. The simulation covers 20 random rooms and a 240 m hall beyond one hotspot's range.
+
+The simulation models radio simply, with signal falling off with distance. It shows the rules work, not that real phones and Wi-Fi will. Capacity and battery life on real phones are **not measured yet**.
+
+**What it can't do**
+- Phones without the app, including all iPhones, can still watch, but they join by scanning a code and don't move by themselves if their repeater leaves.
+- iOS doesn't let apps run a hotspot, so iPhones never repeat.
+- A web page or PWA can't repeat. Browsers can't start a hotspot or accept connections.
+
 ## Repeaters: more than 10 phones
 
 A repeater is an Android phone that does three things at once:
@@ -52,7 +77,7 @@ The relay follows the host's live stream, copies the slides once, and serves the
 **Steps on the repeater phone**
 1. Scan the host's Wi-Fi code to join it. You can also join another repeater, which builds a chain.
 2. Turn **mobile data off**. Otherwise Android sends traffic over mobile data instead of the host's Wi-Fi.
-3. Open Boatcast and tap **Repeater**. It finds the host on its own. If it can't, type the address shown under the host's page code.
+3. Open Boatcast and tap **Join**. It finds the host on its own and repeats when phones nearby need it.
 4. The phones near this repeater scan the repeater's two codes.
 
 **What a repeater needs**
@@ -157,11 +182,16 @@ GitHub Actions tests and builds everything on each push, including an Android em
 
 To publish downloads, create a release on GitHub (Releases → Draft a new release → tag such as `v0.1.0` → Publish). The build attaches the APK and every binary to it within about 10 minutes.
 
-The Android app is in `android/`: plain Java with no libraries. It bundles the Rust server as `lib/<abi>/libboatcast.so` and runs it as a program. The APK is signed with a shared development key that's checked into the repo, so new builds install over old ones. Replace it with your own key before distributing widely.
+The Android app is in `android/`: plain Java with no libraries. It bundles the Rust server as `lib/<abi>/libboatcast.so` and runs it as a program. The mesh rules and the simulation are in `MeshPlanner.java` and `MeshPlannerTest.java`.
+
+**Signing.** The APK is signed with a private release key that the repository never holds. You add it once as two GitHub secrets, `ANDROID_KEYSTORE_B64` and `ANDROID_KEYSTORE_PASSWORD` (Settings → Secrets and variables → Actions). If they're missing, the build uses a throwaway key and the release step refuses to publish the APK.
+
+Version 0.1.0 was signed with a key that was public in this repository. Delete that release, and uninstall 0.1.0 from any phone before installing a newer version.
 
 ## Limits to know
 
-- **Phone hotspot size**: about 10 phones, set by the maker. Apps can't raise it, so use repeaters.
+- **Phone hotspot size**: about 10 phones, set by the maker. Apps can't raise it, so use repeaters. The mesh counts on 8 per hotspot.
+- **Capacity and battery not measured on real phones**: figures like 100 or 1,000 phones come from the simulation and the server load test, not from a real room of phones.
 - **Viewers and mobile data**: viewers must turn mobile data off if the page doesn't load. Android prefers mobile data when the Wi-Fi has no internet.
 - **Hotspot address changes**: Android 11 and later give the hotspot a new address each session. The app reads it fresh every time, so always use the codes on screen.
 - **Tested on an emulator, not yet on real phones**: on an Android 13 emulator in CI, the app installs, runs its server, starts a local-only hotspot when you tap Host, and a relay follows a host. Hotspot behaviour and STA + AP support vary by maker, so try three to five phones before the day.

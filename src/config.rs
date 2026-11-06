@@ -20,6 +20,7 @@ OPTIONS
   --host-ip IP        this device's address, if auto-detection picks the wrong one
   --captive           answer phone connectivity checks so the page pops up on join (needs DNS wildcard)
   --max-clients N     refuse viewers beyond N (default 2000)
+  --mesh-id N         host: id that phones use to tell this show's mesh apart (relays inherit it)
   --threads N|auto    worker threads (default 1; auto = CPU cores, max 8)
   --upstream URL      relay mode: the boatcast to follow
   --tls-cert FILE     HTTPS certificate chain (PEM)   [build with --features tls]
@@ -40,6 +41,7 @@ pub struct Config {
     pub host_ip: Option<IpAddr>,
     pub captive: bool,
     pub max_clients: usize,
+    pub mesh_id: Option<u16>,
     pub threads: usize,
     pub upstream: Option<(String, u16)>,
     pub upstream_url: Option<String>,
@@ -48,7 +50,7 @@ pub struct Config {
     pub https_port: u16,
 }
 
-fn parse_upstream(u: &str) -> Result<(String, u16), String> {
+pub fn parse_upstream(u: &str) -> Result<(String, u16), String> {
     let rest = u.strip_prefix("http://").ok_or("--upstream must start with http:// (relays talk plain HTTP on the LAN)")?;
     let hostport = rest.split('/').next().unwrap_or(rest);
     match hostport.rsplit_once(':') {
@@ -71,6 +73,7 @@ impl Config {
             host_ip: None,
             captive: false,
             max_clients: 2000,
+            mesh_id: None,
             threads: 1,
             upstream: None,
             upstream_url: None,
@@ -94,6 +97,7 @@ impl Config {
                 "--public-url" => c.public_url = Some(val("--public-url")?),
                 "--host-ip" => c.host_ip = Some(val("--host-ip")?.parse().map_err(|_| "bad --host-ip")?),
                 "--captive" => c.captive = true,
+                "--mesh-id" => c.mesh_id = Some(val("--mesh-id")?.parse().map_err(|_| "bad --mesh-id (0-65535)")?),
                 "--max-clients" => c.max_clients = val("--max-clients")?.parse().map_err(|_| "bad --max-clients")?,
                 "--threads" => {
                     let v = val("--threads")?;

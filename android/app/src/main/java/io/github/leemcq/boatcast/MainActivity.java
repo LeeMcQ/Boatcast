@@ -2,7 +2,6 @@ package io.github.leemcq.boatcast;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
@@ -11,7 +10,6 @@ import android.database.Cursor;
 import android.graphics.Color;
 import android.location.LocationManager;
 import android.net.ConnectivityManager;
-import android.net.DhcpInfo;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.Uri;
@@ -20,14 +18,12 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.provider.Settings;
-import android.text.InputType;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
-import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -44,7 +40,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * One screen: Host / Repeater / Pick slides / Stop, a status line, and the presenter
+ * One screen: Host / Join / Pick slides / Stop, a status line, and the presenter
  * console (served by the bundled Rust server) in a WebView once broadcasting.
  */
 public class MainActivity extends Activity implements CastService.Listener {
@@ -82,7 +78,7 @@ public class MainActivity extends Activity implements CastService.Listener {
         root.addView(status);
 
         hostBtn = button("Host", v -> withPermission(this::startHost));
-        relayBtn = button("Repeater", v -> withPermission(this::startRepeater));
+        relayBtn = button("Join", v -> withPermission(this::startJoin));
         root.addView(row(hostBtn, relayBtn));
 
         slidesBtn = button("Pick slides", v -> pickSlides());
@@ -146,10 +142,9 @@ public class MainActivity extends Activity implements CastService.Listener {
         if (consoleUrl != null) {
             if (!consoleUrl.equals(shownUrl)) {
                 shownUrl = consoleUrl;
-                // the server needs a moment to bind its port
-                web.postDelayed(() -> web.loadUrl(consoleUrl), 600);
+                web.loadUrl(consoleUrl); // the service only reports it once the server answers
             }
-        } else if (shownUrl != null || web.getUrl() == null) {
+        } else if (shownUrl != null || web.getUrl() == null || !running) {
             shownUrl = null;
             web.loadDataWithBaseURL(null, HELP, "text/html", "utf-8", null);
         }
@@ -237,97 +232,19 @@ public class MainActivity extends Activity implements CastService.Listener {
         }
     }
 
-    // ------------------------------------------------------------ repeater
+    // ---------------------------------------------------------------- join
 
-    @SuppressWarnings("deprecation")
-    private void startRepeater() {
-        WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        if (Build.VERSION.SDK_INT >= 30 && !wifi.isStaApConcurrencySupported()) {
-            say("This phone cannot stay on Wi-Fi while running its own hotspot, so it cannot repeat. "
-                    + "It can still watch, or be the host.");
-            return;
-        }
-        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        Network active = cm.getActiveNetwork();
-        NetworkCapabilities caps = active == null ? null : cm.getNetworkCapabilities(active);
-        if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-            say("First join the host's Wi-Fi (scan its Wi-Fi code) and turn mobile data off, "
-                    + "so this phone talks to the host over Wi-Fi. Then tap Repeater.");
-            return;
-        }
-        DhcpInfo dhcp = wifi.getDhcpInfo();
-        int g = dhcp == null ? 0 : dhcp.gateway;
-        if (g == 0) {
-            askForHost("Could not find the host on this Wi-Fi.");
-            return;
-        }
-        String gw = (g & 0xff) + "." + (g >> 8 & 0xff) + "." + (g >> 16 & 0xff) + "." + (g >> 24 & 0xff);
-        say("Looking for Boatcast at " + gw + "…");
-        new Thread(() -> {
-            String found = null;
-            for (int port : new int[] {CastService.PORT, 80}) {
-                String base = "http://" + gw + (port == 80 ? "" : ":" + port);
-                if (isBoatcast(base)) {
-                    found = base;
-                    break;
-                }
+    /** Join mode: find the show (Bluetooth or the Wi-Fi this phone is on), watch, repeat when useful. */
+    private void startJoin() {
+        android.bluetooth.BluetoothAdapter bt = android.bluetooth.BluetoothAdapter.getDefaultAdapter();
+        if (bt != null && !bt.isEnabled()) {
+            try {
+                startActivity(new Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE));
+            } catch (RuntimeException ignored) {
+                // no Bluetooth settings screen; Join still works through a Wi-Fi code
             }
-            final String up = found;
-            runOnUiThread(() -> {
-                if (up == null) askForHost("No Boatcast answered at " + gw + ".");
-                else startRelay(up);
-            });
-        }, "boatcast-probe").start();
-    }
-
-    private void askForHost(String why) {
-        EditText input = new EditText(this);
-        input.setHint("192.168.43.1:8080");
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        new AlertDialog.Builder(this)
-                .setTitle("Host address")
-                .setMessage(why + " Type the address shown under the host's page code.")
-                .setView(input)
-                .setPositiveButton("Repeat it", (d, w) -> {
-                    String a = input.getText().toString().trim();
-                    if (a.startsWith("http://")) a = a.substring(7);
-                    while (a.endsWith("/")) a = a.substring(0, a.length() - 1);
-                    if (a.isEmpty()) return;
-                    final String base = "http://" + a;
-                    new Thread(() -> {
-                        boolean ok = isBoatcast(base);
-                        runOnUiThread(() -> {
-                            if (ok) startRelay(base);
-                            else say("No Boatcast answered at " + base + ".");
-                        });
-                    }, "boatcast-probe").start();
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    private void startRelay(String upstream) {
-        startForegroundService(new Intent(this, CastService.class)
-                .setAction(CastService.ACTION_RELAY)
-                .putExtra(CastService.EXTRA_UPSTREAM, upstream));
-    }
-
-    /** GET /status and check it is a Boatcast server. Runs off the UI thread. */
-    private static boolean isBoatcast(String base) {
-        HttpURLConnection c = null;
-        try {
-            c = (HttpURLConnection) new URL(base + "/status").openConnection();
-            c.setConnectTimeout(1500);
-            c.setReadTimeout(1500);
-            if (c.getResponseCode() != 200) return false;
-            try (InputStream in = c.getInputStream()) {
-                return readAll(in, 8192).contains("\"app\":\"boatcast\"");
-            }
-        } catch (IOException e) {
-            return false;
-        } finally {
-            if (c != null) c.disconnect();
         }
+        startForegroundService(new Intent(this, CastService.class).setAction(CastService.ACTION_JOIN));
     }
 
     private static String readAll(InputStream in, int max) throws IOException {
@@ -364,21 +281,21 @@ public class MainActivity extends Activity implements CastService.Listener {
         say("Copying " + uris.size() + " file(s)…");
         new Thread(() -> {
             String msg = copySlides(uris);
-            if (CastService.isRunning()) msg += reloadDeck();
+            if (CastService.hosting) msg += reloadDeck();
             say(msg);
         }, "boatcast-slides").start();
     }
 
-    /** Replace the deck folder with the picked files (images, slides.txt or deck.json). */
+    /**
+     * Replace the deck with the picked files (images, slides.txt or deck.json). Files are
+     * copied into a new folder first; the old deck is only replaced once every copy worked.
+     */
     private String copySlides(List<Uri> uris) {
         File dir = deckDir(this);
-        File[] old = dir.listFiles();
-        if (old != null) {
-            for (File f : old) {
-                //noinspection ResultOfMethodCallIgnored
-                f.delete();
-            }
-        }
+        File fresh = new File(getFilesDir(), "deck.new");
+        deleteTree(fresh);
+        //noinspection ResultOfMethodCallIgnored
+        fresh.mkdirs();
         int n = 0;
         for (Uri u : uris) {
             String name = displayName(u);
@@ -386,18 +303,43 @@ public class MainActivity extends Activity implements CastService.Listener {
             String type = getContentResolver().getType(u);
             if (lower.endsWith(".json") || "application/json".equals(type)) name = "deck.json";
             else if (lower.endsWith(".txt") || "text/plain".equals(type)) name = "slides.txt";
+            else if (type != null && !type.startsWith("image/")) continue; // not a slide
             try (InputStream in = getContentResolver().openInputStream(u);
-                 OutputStream out = new FileOutputStream(new File(dir, name))) {
+                 OutputStream out = new FileOutputStream(new File(fresh, name))) {
                 if (in == null) continue;
                 byte[] buf = new byte[64 * 1024];
                 int r;
                 while ((r = in.read(buf)) > 0) out.write(buf, 0, r);
                 n++;
             } catch (IOException e) {
-                return "Could not copy " + name + ": " + e.getMessage();
+                deleteTree(fresh);
+                return "Could not copy " + name + " (" + e.getMessage() + "). Your old slides are unchanged.";
             }
         }
+        if (n == 0) {
+            deleteTree(fresh);
+            return "None of those files are slides (images, slides.txt or deck.json). Your old slides are unchanged.";
+        }
+        File old = new File(getFilesDir(), "deck.old");
+        deleteTree(old);
+        if (dir.exists() && !dir.renameTo(old)) {
+            deleteTree(fresh);
+            return "Could not replace the slides. Your old slides are unchanged.";
+        }
+        if (!fresh.renameTo(dir)) {
+            //noinspection ResultOfMethodCallIgnored
+            old.renameTo(dir);
+            return "Could not replace the slides. Your old slides are unchanged.";
+        }
+        deleteTree(old);
         return "Loaded " + n + " file(s) as the slides.";
+    }
+
+    private static void deleteTree(File f) {
+        File[] kids = f.listFiles();
+        if (kids != null) for (File k : kids) deleteTree(k);
+        //noinspection ResultOfMethodCallIgnored
+        f.delete();
     }
 
     private String displayName(Uri u) {
@@ -440,10 +382,12 @@ public class MainActivity extends Activity implements CastService.Listener {
             + "<h3>Host</h3><ol><li>Tap <b>Host</b>. This phone starts its own hotspot.</li>"
             + "<li>Show the two codes on screen: phones scan the Wi-Fi code, then the page code.</li>"
             + "<li>Change slides from the console that opens here.</li></ol>"
-            + "<h3>Repeater (more than 10 phones)</h3><ol>"
-            + "<li>Scan the host's Wi-Fi code (or another repeater's) to join it.</li>"
-            + "<li>Turn mobile data off.</li><li>Tap <b>Repeater</b>. This phone shows its own two codes; "
-            + "about 10 more phones can join it. Repeaters can chain.</li></ol>"
+            + "<h3>Join (builds the mesh by itself)</h3><ol>"
+            + "<li>Turn Bluetooth on and mobile data off.</li>"
+            + "<li>Tap <b>Join</b>. The phone finds the nearest host or repeater, joins its Wi-Fi and shows the slides.</li>"
+            + "<li>If phones nearby need a way in and this phone can, it also becomes a repeater by itself, "
+            + "and hands over when its battery runs low.</li></ol>"
+            + "<p>Phones without the app can still scan the Wi-Fi code and page code shown by the host.</p>"
             + "<h3>Slides</h3><p>Tap <b>Pick slides</b> and choose images (PowerPoint: File, Export, PNG), "
             + "a slides.txt (blank line between slides, # for a title) or a deck.json. "
             + "You can also type slides in the console.</p>"
