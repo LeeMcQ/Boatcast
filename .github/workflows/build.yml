@@ -3,9 +3,11 @@ name: build
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
+  # Publish a release on GitHub (e.g. tag v0.1.0) and this run attaches every download to it.
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -139,7 +141,7 @@ jobs:
 
   release:
     name: Publish release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'release'
     needs: [test, linux, desktop, android, android-emulator]
     runs-on: ubuntu-latest
     steps:
@@ -150,5 +152,5 @@ jobs:
       - run: ls -l dist
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.release.tag_name }}
           files: dist/*
-          generate_release_notes: true

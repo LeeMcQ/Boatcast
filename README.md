@@ -155,7 +155,7 @@ GitHub Actions tests and builds everything on each push, including an Android em
 - Windows, macOS and Linux builds with HTTPS.
 - Android binaries and the APK.
 
-Push a tag such as `v0.1.1` to publish a release.
+To publish downloads, create a release on GitHub (Releases → Draft a new release → tag such as `v0.1.0` → Publish). The build attaches the APK and every binary to it within about 10 minutes.
 
 The Android app is in `android/`: plain Java with no libraries. It bundles the Rust server as `lib/<abi>/libboatcast.so` and runs it as a program. The APK is signed with a shared development key that's checked into the repo, so new builds install over old ones. Replace it with your own key before distributing widely.
 
