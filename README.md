@@ -150,7 +150,7 @@ cargo build --release --features tls   # with HTTPS, 2.3 MB
 cargo test --release && bash tests/smoke.sh
 ```
 
-GitHub Actions builds everything on each push:
+GitHub Actions tests and builds everything on each push, including an Android emulator test (`tests/android-emulator.sh`):
 - Linux musl static binaries for x86_64, ARM64 and ARMv7.
 - Windows, macOS and Linux builds with HTTPS.
 - Android binaries and the APK.
@@ -164,4 +164,4 @@ The Android app is in `android/`: plain Java with no libraries. It bundles the R
 - **Phone hotspot size**: about 10 phones, set by the maker. Apps can't raise it, so use repeaters.
 - **Viewers and mobile data**: viewers must turn mobile data off if the page doesn't load. Android prefers mobile data when the Wi-Fi has no internet.
 - **Hotspot address changes**: Android 11 and later give the hotspot a new address each session. The app reads it fresh every time, so always use the codes on screen.
-- **Not yet tested on real phones**: the repeater app has been built and checked here, but not yet run on a phone. Hotspot behaviour varies by maker.
+- **Tested on an emulator, not yet on real phones**: on an Android 13 emulator in CI, the app installs, runs its server, starts a local-only hotspot when you tap Host, and a relay follows a host. Hotspot behaviour and STA + AP support vary by maker, so try three to five phones before the day.
