@@ -277,9 +277,12 @@ public class CastService extends Service {
     /** The hotspot gets its address a moment after onStarted; wait for it. */
     private String waitForHotspotIp(long ms) {
         String sta = stationIp();
-        long end = SystemClock.elapsedRealtime() + ms;
+        long start = SystemClock.elapsedRealtime(), end = start + ms;
         while (SystemClock.elapsedRealtime() < end && !stopping) {
-            String ip = hotspotIp(sta);
+            // Wi-Fi-named interfaces first; anything else only near the end of the wait,
+            // so a stray interface (emulator eth0, a vendor modem) never beats the hotspot.
+            boolean late = SystemClock.elapsedRealtime() - start > ms * 3 / 4;
+            String ip = hotspotIp(sta, late);
             if (ip != null) return ip;
             SystemClock.sleep(250);
         }
@@ -297,19 +300,17 @@ public class CastService extends Service {
 
     /**
      * The hotspot interface's IPv4 address. Names differ by maker (ap0, swlan0, wlan1,
-     * softap0, sometimes wlan0), so prefer known hotspot names and otherwise take any
-     * private address that is not the station address.
+     * softap0, sometimes wlan0), so: known hotspot names first, then other Wi-Fi names,
+     * then (only if allowed) any other private address. Never the station address and
+     * never a mobile-data interface.
      */
-    static String hotspotIp(String skip) {
-        String fallback = null;
+    static String hotspotIp(String skip, boolean allowOther) {
+        String wifiLike = null, other = null;
         try {
             for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
                 if (!ni.isUp() || ni.isLoopback()) continue;
                 String n = ni.getName();
-                if (n.startsWith("rmnet") || n.startsWith("ccmni") || n.startsWith("tun")
-                        || n.startsWith("dummy") || n.startsWith("p2p") || n.startsWith("rndis")) {
-                    continue;
-                }
+                if (isMobileData(n)) continue;
                 for (InetAddress a : Collections.list(ni.getInetAddresses())) {
                     if (!(a instanceof Inet4Address) || !a.isSiteLocalAddress()) continue;
                     String ip = a.getHostAddress();
@@ -318,13 +319,26 @@ public class CastService extends Service {
                             || n.equals("wlan1") || n.equals("wlan2")) {
                         return ip;
                     }
-                    if (fallback == null) fallback = ip;
+                    if (n.startsWith("wlan") || n.startsWith("wl") || n.startsWith("wifi")) {
+                        if (wifiLike == null) wifiLike = ip;
+                    } else if (other == null) {
+                        other = ip;
+                    }
                 }
             }
         } catch (SocketException ignored) {
             // no interfaces yet
         }
-        return fallback;
+        if (wifiLike != null) return wifiLike;
+        return allowOther ? other : null;
+    }
+
+    private static boolean isMobileData(String n) {
+        for (String p : new String[] {"rmnet", "r_rmnet", "rev_rmnet", "ccmni", "seth", "ccinet", "pdp",
+                "ppp", "wwan", "tun", "dummy", "p2p", "rndis", "usb", "v4-", "clat"}) {
+            if (n.startsWith(p)) return true;
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------ misc
