@@ -13,7 +13,7 @@ android {
         // and location (not NEARBY_WIFI_DEVICES) is the only runtime permission the hotspot needs.
         targetSdk 28
         versionCode((System.getenv('GITHUB_RUN_NUMBER') ?: '1') as int)
-        versionName '0.1.0'
+        versionName '0.2.0'
     }
 
     // Release signing key comes from the environment (CI: GitHub secrets), never from the repo.

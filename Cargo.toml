@@ -1,6 +1,6 @@
 [package]
 name = "boatcast"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Offline Wi-Fi broadcaster for live slides and words: one small server, every phone follows in its browser"
 license = "MIT"
