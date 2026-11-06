@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<title>Live slides</title>
+<style>
+:root{--bg:#000;--fg:#f5f5f5;--dim:#8f8f8f;--acc:#4da3ff;--line:#333;--scale:1}
+body.light{--bg:#fafafa;--fg:#111;--dim:#5c5c5c;--line:#ccc}
+body.contrast{--bg:#000;--fg:#ffe600;--dim:#d0d0d0;--line:#555}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+#bar{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;gap:.55rem;padding:calc(env(safe-area-inset-top) + .45rem) .8rem .45rem;font-size:.85rem;color:var(--dim);z-index:3}
+#dot{width:.6rem;height:.6rem;border-radius:50%;background:#d33;flex:none}
+#dot.ok{background:#2fbf4a}#dot.wait{background:#e5a00d}
+.sp{flex:1}
+button{font:inherit;color:inherit;background:none;border:1px solid var(--line);border-radius:.55rem;padding:.35rem .7rem;cursor:pointer}
+#stage{position:fixed;left:0;right:0;top:calc(env(safe-area-inset-top) + 2.6rem);bottom:0;display:flex;flex-direction:column;align-items:center;padding:.5rem 1.1rem calc(4.2rem + env(safe-area-inset-bottom))}
+#title{font-size:calc(1rem * var(--scale));color:var(--dim);text-align:center;min-height:1.2em;margin-bottom:.4rem}
+#box{flex:1;width:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}
+#box.scroll{overflow-y:auto;align-items:flex-start}
+#text{white-space:pre-wrap;text-align:center;line-height:1.3;max-width:60rem;overflow-wrap:anywhere}
+#img{max-width:100%;max-height:100%;object-fit:contain;display:none}
+.muted{color:var(--dim);font-size:1.1rem}
+#live{position:fixed;left:0;right:0;bottom:0;padding:.8rem 1rem calc(.8rem + env(safe-area-inset-bottom));background:rgba(77,163,255,.2);border-top:1px solid rgba(77,163,255,.45);text-align:center;font-size:calc(1.05rem * var(--scale));display:none;z-index:2}
+#back{position:fixed;right:1rem;bottom:calc(1rem + env(safe-area-inset-bottom));display:none;background:var(--acc);color:#000;border:0;font-weight:600;padding:.6rem 1rem;z-index:4}
+#menu{position:fixed;top:calc(env(safe-area-inset-top) + 2.7rem);right:.6rem;background:var(--bg);border:1px solid var(--line);border-radius:.7rem;padding:.7rem;display:none;flex-direction:column;gap:.5rem;z-index:5;min-width:13rem}
+#menu.open{display:flex}
+#menu .row{display:flex;gap:.4rem;flex-wrap:wrap}
+#menu small{color:var(--dim)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="bar">
+  <span id="dot" title="Connection"></span><span id="pos">Connecting…</span>
+  <span class="sp"></span>
+  <button id="menuBtn" aria-label="Display settings" aria-expanded="false">Aa</button>
+</div>
+<div id="menu" role="dialog" aria-label="Display settings">
+  <small>Text size</small>
+  <div class="row"><button data-scale="-1">A−</button><button data-scale="0">Fit</button><button data-scale="1">A+</button></div>
+  <small>Colours</small>
+  <div class="row"><button data-theme="dark">Dark</button><button data-theme="light">Light</button><button data-theme="contrast">High contrast</button></div>
+  <button id="wakeBtn" hidden>Keep screen on: off</button>
+  <button id="installBtn" hidden>Install as app</button>
+</div>
+<main id="stage" aria-live="polite">
+  <div id="title"></div>
+  <div id="box"><div id="text"><span class="muted">Connecting to the presenter…</span></div><img id="img" alt=""></div>
+</main>
+<div id="live" role="status"></div>
+<button id="back">Back to live</button>
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  // Storage can be missing or throw (private mode, captive mini-browser): never let that break the page.
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+  };
+  let deck = null, deckVer = null, loadingVer = null, live = null, view = null;
+  let es = null, lastMsg = 0, policy = { preload: "all", spread: 0 };
+  let scale = store.get("scale", 1), theme = store.get("theme", "dark");
+  let wantWake = store.get("wake", false), wake = null, installEvt = null;
+
+  function applyPrefs() {
+    document.body.className = theme === "dark" ? "" : theme;
+    document.documentElement.style.setProperty("--scale", String(scale));
+  }
+  applyPrefs();
+
+  // Largest font size at which the text fits the box (binary search), then the reader's own scale.
+  function fitText() {
+    const box = $("box"), t = $("text");
+    if (!t.textContent || t.querySelector(".muted")) { t.style.fontSize = ""; box.classList.remove("scroll"); return; }
+    let lo = 14, hi = Math.max(16, Math.min(140, box.clientHeight));
+    t.style.fontSize = hi + "px";
+    for (let i = 0; i < 9 && hi - lo > 1; i++) {
+      const mid = (lo + hi) >> 1;
+      t.style.fontSize = mid + "px";
+      if (t.scrollHeight <= box.clientHeight && t.scrollWidth <= box.clientWidth) lo = mid; else hi = mid;
+    }
+    const size = Math.round(lo * scale);
+    t.style.fontSize = size + "px";
+    box.classList.toggle("scroll", scale > 1 && t.scrollHeight > box.clientHeight);
+  }
+
+  function render() {
+    const i = view === null ? (live ? live.slide : 0) : view;
+    const s = deck && deck.slides[i];
+    const blank = view === null && live && live.blank;
+    $("back").style.display = view === null ? "none" : "block";
+    $("pos").textContent = deck ? `${i + 1} / ${deck.slides.length}${view !== null ? " · browsing" : ""}` : "Waiting…";
+    const t = $("text"), img = $("img");
+    if (!s || blank) {
+      $("title").textContent = "";
+      img.style.display = "none"; t.style.display = "";
+      t.innerHTML = blank ? "" : '<span class="muted">Waiting for the presenter…</span>';
+      fitText();
+    } else {
+      $("title").textContent = s.title || (deck.title && i === 0 ? deck.title : "");
+      if (s.image) {
+        t.style.display = "none"; t.textContent = "";
+        img.alt = s.text || s.title || `Slide ${i + 1}`;
+        if (img.getAttribute("src") !== s.image) img.src = s.image;
+        img.style.display = "block";
+      } else {
+        img.style.display = "none"; t.style.display = "";
+        t.textContent = s.text || "";
+        fitText();
+      }
+    }
+    const lt = live && live.text;
+    $("live").style.display = lt ? "block" : "none";
+    $("live").textContent = lt || "";
+  }
+
+  // Images: near slides at once, the rest spread out in time so a crowd does not hit the radio together.
+  const fetched = new Set();
+  function pre(url) { if (!url || fetched.has(url)) return; fetched.add(url); const im = new Image(); im.decoding = "async"; im.src = url; }
+  function preNear() {
+    if (!deck) return;
+    const i = live ? live.slide : 0;
+    for (const k of [i, i + 1, i + 2]) if (deck.slides[k]) pre(deck.slides[k].image);
+  }
+  function preRest() {
+    if (!deck) return;
+    const delay = Math.random() * (policy.spread || 0) + (policy.preload === "all" ? 0 : 3000);
+    setTimeout(() => deck && deck.slides.forEach((s) => pre(s.image)), delay);
+  }
+
+  async function loadDeck(ver) {
+    if (ver === deckVer || ver === loadingVer) return;
+    loadingVer = ver;
+    try {
+      const r = await fetch("/deck.json", { cache: "no-cache" });
+      const d = await r.json();
+      deck = d; deckVer = d.version;
+      if (view !== null && view >= d.slides.length) view = null;
+      preNear(); preRest(); render();
+    } catch (e) {
+      setTimeout(() => { loadingVer = null; loadDeck(ver); }, 1500 + Math.random() * 2500);
+      return;
+    }
+    loadingVer = null;
+    if (live && live.deck !== deckVer) loadDeck(live.deck);
+  }
+
+  function setDot(c) { $("dot").className = c; }
+  function connect() {
+    try { if (es) es.close(); } catch (e) {}
+    setDot("wait");
+    es = new EventSource("/events");
+    es.onopen = () => { lastMsg = Date.now(); setDot("ok"); };
+    es.onerror = () => setDot("wait"); // the browser retries on its own, using the server's retry hint
+    es.addEventListener("policy", (e) => { try { policy = JSON.parse(e.data); } catch (_) {} });
+    es.addEventListener("ping", () => { lastMsg = Date.now(); setDot("ok"); });
+    es.addEventListener("state", (e) => {
+      lastMsg = Date.now(); setDot("ok");
+      let s; try { s = JSON.parse(e.data); } catch (_) { return; }
+      if (live && s.deck === live.deck && s.seq < live.seq) return; // stale (e.g. after a relay switch)
+      live = s;
+      if (view !== null && view === s.slide) view = null;
+      loadDeck(s.deck); preNear(); render();
+    });
+  }
+  function reconnectSoon() { lastMsg = Date.now(); setTimeout(connect, Math.random() * 1500); }
+  // Watchdog: the server pings every 15 s; 25 s of silence means a dead link (phones sleep, Wi-Fi roams).
+  setInterval(() => { if (Date.now() - lastMsg > 25000) { setDot("wait"); reconnectSoon(); } }, 5000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    if (Date.now() - lastMsg > 5000) reconnectSoon();
+    requestWake();
+  });
+
+  // Browsing: swipe or arrow keys move your own view; "Back to live" returns to the presenter.
+  function step(d) {
+    if (!deck) return;
+    const base = view === null ? (live ? live.slide : 0) : view;
+    const nv = Math.max(0, Math.min(deck.slides.length - 1, base + d));
+    view = live && nv === live.slide ? null : nv;
+    render();
+  }
+  let tx = null, ty = null;
+  $("stage").addEventListener("touchstart", (e) => { tx = e.touches[0].clientX; ty = e.touches[0].clientY; }, { passive: true });
+  $("stage").addEventListener("touchend", (e) => {
+    if (tx === null) return;
+    const dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) step(dx < 0 ? 1 : -1);
+    tx = ty = null;
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight") step(1);
+    else if (e.key === "ArrowLeft") step(-1);
+    else if (e.key === "Escape") { view = null; render(); }
+  });
+  $("back").onclick = () => { view = null; render(); };
+
+  // Settings menu.
+  $("menuBtn").onclick = () => {
+    const open = $("menu").classList.toggle("open");
+    $("menuBtn").setAttribute("aria-expanded", String(open));
+  };
+  document.querySelectorAll("[data-scale]").forEach((b) => b.onclick = () => {
+    const d = Number(b.dataset.scale);
+    scale = d === 0 ? 1 : Math.max(0.6, Math.min(2.2, Math.round((scale + d * 0.15) * 100) / 100));
+    store.set("scale", scale); applyPrefs(); render();
+  });
+  document.querySelectorAll("[data-theme]").forEach((b) => b.onclick = () => {
+    theme = b.dataset.theme; store.set("theme", theme); applyPrefs();
+  });
+
+  // Keep the screen on (HTTPS or localhost only; hidden elsewhere).
+  function wakeLabel() { $("wakeBtn").textContent = "Keep screen on: " + (wantWake ? "on" : "off"); }
+  async function requestWake() {
+    if (!wantWake || !("wakeLock" in navigator) || document.hidden) return;
+    try { wake = await navigator.wakeLock.request("screen"); } catch (e) {}
+  }
+  if ("wakeLock" in navigator && window.isSecureContext) {
+    $("wakeBtn").hidden = false; wakeLabel();
+    $("wakeBtn").onclick = async () => {
+      wantWake = !wantWake; store.set("wake", wantWake); wakeLabel();
+      if (wantWake) requestWake(); else if (wake) { try { await wake.release(); } catch (e) {} wake = null; }
+    };
+    requestWake();
+  }
+
+  // Installable app: works when served over HTTPS (or localhost); otherwise this stays a plain web page.
+  window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installEvt = e; $("installBtn").hidden = false; });
+  $("installBtn").onclick = async () => { if (!installEvt) return; installEvt.prompt(); installEvt = null; $("installBtn").hidden = true; };
+  if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/sw.js").catch(() => {});
+
+  let rz = null;
+  window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(render, 120); });
+  connect();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'io.github.leemcq.boatcast'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'io.github.leemcq.boatcast'
+        minSdk 26
+        // 28 on purpose: Termux-style behaviour for the bundled server (no netlink limits),
+        // and location (not NEARBY_WIFI_DEVICES) is the only runtime permission the hotspot needs.
+        targetSdk 28
+        versionCode((System.getenv('GITHUB_RUN_NUMBER') ?: '1') as int)
+        versionName '0.1.0'
+    }
+
+    // One shared signing key so every CI build installs over the last one.
+    // It is public on purpose; use your own key (GitHub secret) for wider distribution.
+    signingConfigs {
+        shared {
+            storeFile file('boatcast-dev.keystore')
+            storePassword 'boatcast'
+            keyAlias 'boatcast'
+            keyPassword 'boatcast'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.shared
+        }
+        debug {
+            signingConfig signingConfigs.shared
+        }
+    }
+
+    // The Rust server ships as lib/<abi>/libboatcast.so and is run as a program,
+    // so it must be extracted to nativeLibraryDir at install time.
+    packaging {
+        jniLibs { useLegacyPackaging true }
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+}

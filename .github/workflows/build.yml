@@ -1,0 +1,124 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test (unit + end-to-end)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo test --release
+      - run: cargo build --release
+      - run: bash tests/smoke.sh
+
+  linux:
+    name: Linux ${{ matrix.target }} (Termux, routers, Raspberry Pi)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+          - armv7-unknown-linux-musleabihf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install ziglang cargo-zigbuild
+      - run: rustup target add ${{ matrix.target }}
+      - run: cargo zigbuild --release --target ${{ matrix.target }}
+      - run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/boatcast dist/boatcast-${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boatcast-${{ matrix.target }}
+          path: dist/*
+
+  desktop:
+    name: Laptop ${{ matrix.target }} (with HTTPS)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, ext: .exe }
+          - { os: macos-latest, target: aarch64-apple-darwin, ext: '' }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, ext: '' }
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add ${{ matrix.target }}
+      - run: cargo build --release --features tls --target ${{ matrix.target }}
+      - shell: bash
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/boatcast${{ matrix.ext }} dist/boatcast-tls-${{ matrix.target }}${{ matrix.ext }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boatcast-tls-${{ matrix.target }}
+          path: dist/*
+
+  android:
+    name: Android app (host + repeater)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+      - name: Build the server for each Android ABI
+        run: |
+          NDK_BIN="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          mkdir -p dist
+          build() {
+            target=$1; abi=$2; clang=$3
+            var="CARGO_TARGET_$(echo "$target" | tr 'a-z-' 'A-Z_')_LINKER"
+            env "$var=$NDK_BIN/$clang" cargo build --release --target "$target"
+            mkdir -p "android/app/src/main/jniLibs/$abi"
+            cp "target/$target/release/boatcast" "android/app/src/main/jniLibs/$abi/libboatcast.so"
+            cp "target/$target/release/boatcast" "dist/boatcast-$target"
+          }
+          build aarch64-linux-android   arm64-v8a   aarch64-linux-android26-clang
+          build armv7-linux-androideabi armeabi-v7a armv7a-linux-androideabi26-clang
+          build x86_64-linux-android    x86_64      x86_64-linux-android26-clang
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - run: gradle -p android assembleRelease --no-daemon
+      - run: cp android/app/build/outputs/apk/release/app-release.apk dist/boatcast.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boatcast-android
+          path: dist/*
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, linux, desktop, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: ls -l dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

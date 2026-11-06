@@ -1,0 +1,9 @@
+{
+  "title": "Demo service",
+  "slides": [
+    { "title": "Welcome", "text": "Good morning, and welcome.\nPlease find a seat.", "notes": "Wait for the room to settle." },
+    { "title": "Opening song", "text": "Verse 1\nThis is a line of the song\nAnd this is the second line\nThe third line follows here\nAnd the verse ends here" },
+    { "image": "slide-03.webp", "text": "Image slide: exported from PowerPoint as WebP" },
+    { "title": "Notices", "text": "Lunch is served in the hall after the service.", "notes": "Mention the parking change." }
+  ]
+}
