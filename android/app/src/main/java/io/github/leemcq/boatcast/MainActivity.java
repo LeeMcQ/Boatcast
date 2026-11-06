@@ -100,6 +100,29 @@ public class MainActivity extends Activity implements CastService.Listener {
         root.addView(web, lp);
 
         setContentView(root);
+        if (saved == null) selfCheck();
+    }
+
+    /** Make sure this phone can run the bundled server before anyone relies on it. */
+    private void selfCheck() {
+        new Thread(() -> {
+            File bin = new File(getApplicationInfo().nativeLibraryDir, "libboatcast.so");
+            String problem = null;
+            try {
+                Process p = new ProcessBuilder(bin.getAbsolutePath(), "-h").redirectErrorStream(true).start();
+                String out = readAll(p.getInputStream(), 4096);
+                p.waitFor();
+                if (!out.contains("boatcast")) problem = "unexpected output";
+            } catch (IOException | InterruptedException e) {
+                problem = e.getMessage();
+            }
+            if (problem == null) {
+                android.util.Log.i("boatcast", "self-check ok: " + bin);
+            } else {
+                android.util.Log.e("boatcast", "self-check failed: " + problem);
+                say("This phone cannot run the Boatcast server (" + problem + ").");
+            }
+        }, "boatcast-selfcheck").start();
     }
 
     @Override

@@ -19,11 +19,12 @@ adb install -r "$APK" || fail "install"
 pass "APK installs"
 
 # 1. The server binary is extracted from the APK and runs on Android (bionic).
-LIBDIR=$(adb shell dumpsys package "$PKG" | tr -d '\r' | grep -m1 -o 'legacyNativeLibraryDir=[^ ]*' | cut -d= -f2)
-ABI=$(adb shell getprop ro.product.cpu.abi | tr -d '\r')
-BIN="$LIBDIR/$ABI/libboatcast.so"
-echo "native lib dir: $LIBDIR  abi: $ABI"
-if adb shell ls -l "$BIN" 2>/dev/null | grep -q libboatcast; then
+# the path holds base64 with '=' signs, so take everything after the key
+LIBDIR=$(adb shell dumpsys package "$PKG" | tr -d '\r' | sed -n 's/.*legacyNativeLibraryDir=\([^ ]*\).*/\1/p' | head -1)
+echo "native lib dir: $LIBDIR"
+adb shell ls -lR "$LIBDIR" 2>&1 | head -12
+BIN=$(adb shell ls "$LIBDIR"/*/libboatcast.so 2>/dev/null | tr -d '\r' | head -1)
+if [ -n "$BIN" ] && adb shell ls -l "$BIN" 2>/dev/null | grep -q libboatcast; then
   pass "server binary extracted to $BIN"
 else
   adb shell ls -lR "$LIBDIR" 2>&1 | head -20
@@ -73,6 +74,13 @@ for b in Host Repeater "Pick slides" Stop; do
   grep -q "text=\"$b\"" /tmp/ui.xml || fail "button '$b' missing"
 done
 pass "app starts with Host, Repeater, Pick slides, Stop"
+sleep 1
+if adb logcat -d -s boatcast | grep -q "self-check ok"; then
+  pass "the app can run its bundled server"
+else
+  adb logcat -d -s boatcast | tail -5
+  fail "the app could not run its bundled server"
+fi
 
 read -r x1 y1 x2 y2 < <(grep -o 'text="Host"[^>]*' /tmp/ui.xml | grep -o 'bounds="[^"]*"' | head -1 | tr -c '0-9\n' ' ')
 adb shell input tap $(( (x1 + x2) / 2 )) $(( (y1 + y2) / 2 ))

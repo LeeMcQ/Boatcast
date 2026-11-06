@@ -52,7 +52,7 @@ public class CastService extends Service {
     }
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
-    private static volatile String status = "Stopped";
+    private static volatile String status = "Ready: tap Host or Repeater.";
     private static volatile boolean running = false;
     private static volatile String consoleUrl = null;
     private static Listener listener;
