@@ -111,9 +111,17 @@ jobs:
         run: |
           mkdir -p dist
           if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            # Pasting on a phone can add spaces, line breaks or quotes: keep only base64 characters.
+            CLEAN=$(printf '%s' "$KEYSTORE_B64" | tr -cd 'A-Za-z0-9+/=')
+            PASS=$(printf '%s' "$KEYSTORE_PASSWORD" | tr -d ' \r\n\t"')
+            echo "Key secret: ${#CLEAN} base64 characters"
+            if ! printf '%s' "$CLEAN" | base64 -d > "$RUNNER_TEMP/release.jks" 2>/dev/null \
+               || ! keytool -list -keystore "$RUNNER_TEMP/release.jks" -storetype PKCS12 -storepass "$PASS" >/dev/null 2>&1; then
+              echo "::error::The ANDROID_KEYSTORE_B64 / ANDROID_KEYSTORE_PASSWORD secrets don't open as a key (${#CLEAN} characters received). Paste them again, each value whole, with nothing added."
+              exit 1
+            fi
+            echo "BOATCAST_KEYSTORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
             echo "BOATCAST_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-            echo "BOATCAST_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
             echo "Signing with the release key from secrets."
           else
             echo "::warning::No ANDROID_KEYSTORE_B64 / ANDROID_KEYSTORE_PASSWORD secrets: this APK uses a throwaway key and will not be published."
