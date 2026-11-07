@@ -111,9 +111,16 @@ jobs:
         run: |
           mkdir -p dist
           if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
-            # Pasting on a phone can add spaces, line breaks or quotes: keep only base64 characters.
-            CLEAN=$(printf '%s' "$KEYSTORE_B64" | tr -cd 'A-Za-z0-9+/=')
-            PASS=$(printf '%s' "$KEYSTORE_PASSWORD" | tr -d ' \r\n\t"')
+            # Pasting on a phone can add spaces, line breaks or quotes, or the whole key file.
+            # The key: the one long base64 run if there is one, else every base64 character.
+            CLEAN=$(printf '%s' "$KEYSTORE_B64" | tr -s ' \t\r"' '\n' | awk 'length >= 1000' | head -1 | tr -cd 'A-Za-z0-9+/=')
+            [ -n "$CLEAN" ] || CLEAN=$(printf '%s' "$KEYSTORE_B64" | tr -cd 'A-Za-z0-9+/=')
+            # The password: the line after "Value:" under its name if the file was pasted, else the value itself.
+            PASS=""
+            for SRC in "$KEYSTORE_PASSWORD" "$KEYSTORE_B64"; do
+              [ -n "$PASS" ] || PASS=$(printf '%s\n' "$SRC" | tr -d '\r' | awk '/ANDROID_KEYSTORE_PASSWORD/{f=1} f && /^Value/{getline; print; exit}' | tr -d ' \t"')
+            done
+            [ -n "$PASS" ] || PASS=$(printf '%s' "$KEYSTORE_PASSWORD" | tr -d ' \r\n\t"')
             echo "Key secret: ${#CLEAN} base64 characters"
             if ! printf '%s' "$CLEAN" | base64 -d > "$RUNNER_TEMP/release.jks" 2>/dev/null \
                || ! keytool -list -keystore "$RUNNER_TEMP/release.jks" -storetype PKCS12 -storepass "$PASS" >/dev/null 2>&1; then
