@@ -172,6 +172,36 @@ jobs:
           # One retry: the emulator's Google services sometimes crash and take the app with them.
           script: bash tests/android-emulator.sh dist/boatcast.apk dist/boatcast-x86_64-linux-android || (echo "---- retrying once" && sleep 5 && bash tests/android-emulator.sh dist/boatcast.apk dist/boatcast-x86_64-linux-android)
 
+  website-apk:
+    name: Put the APK on the website
+    # Every push to main that passes the Android tests replaces boatcast.apk on the site,
+    # so https://leemcq.github.io/Boatcast/boatcast.apk always serves the latest build.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [android, android-emulator]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: boatcast-android
+          path: dist
+      - name: Refuse an APK signed with a throwaway key
+        run: |
+          if [ -e dist/THROWAWAY-KEY ]; then
+            echo "::error::No working signing-key secrets, so the website APK was not updated."
+            exit 1
+          fi
+      - name: Commit boatcast.apk
+        run: |
+          cp dist/boatcast.apk boatcast.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add boatcast.apk
+          if git diff --cached --quiet; then echo "APK unchanged"; exit 0; fi
+          git commit -m "Website APK from ${GITHUB_SHA::7} [skip ci]"
+          for i in 1 2 3; do git pull --rebase -q origin main && git push -q origin HEAD:main && exit 0; sleep 5; done
+          exit 1
+
   release:
     name: Publish release
     if: github.event_name == 'release'
