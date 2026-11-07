@@ -110,6 +110,30 @@ else
   echo "INFO: console text not visible in the UI dump (WebView accessibility may be off)"
 fi
 
+# 3b. Host tabs: what phones see, and the codes to share.
+tap_text() {
+  adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+  adb pull /sdcard/ui.xml /tmp/uit.xml >/dev/null 2>&1
+  read -r x1 y1 x2 y2 < <(grep -o "text=\"$1\"[^>]*" /tmp/uit.xml | grep -o 'bounds="[^"]*"' | head -1 | tr -c '0-9\n' ' ')
+  [ -n "${x2:-}" ] || return 1
+  adb shell input tap $(( (x1 + x2) / 2 )) $(( (y1 + y2) / 2 ))
+}
+for t in Controls "Phones see" Share; do grep -q "text=\"$t\"" /tmp/ui2.xml || fail "tab '$t' missing for the host"; done
+pass "host shows Controls, Phones see and Share tabs"
+tap_text "Phones see" || fail "cannot tap Phones see"; sleep 4
+adb shell pidof "$PKG" >/dev/null || fail "app died on Phones see"
+tap_text "Share" || fail "cannot tap Share"; sleep 3
+adb shell pidof "$PKG" >/dev/null || fail "app died on Share"
+adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; adb pull /sdcard/ui.xml /tmp/ui5.xml >/dev/null 2>&1
+if grep -q "Join the Wi-Fi" /tmp/ui5.xml && grep -q "Send these details" /tmp/ui5.xml; then
+  pass "Share tab shows the codes, Wi-Fi name, password and address"
+else
+  echo "INFO: Share text not visible in the UI dump (WebView accessibility may be off)"
+fi
+grep -o 'text="http://[^"]*"' /tmp/ui5.xml | head -1
+tap_text "Controls" || true; sleep 2
+adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; adb pull /sdcard/ui.xml /tmp/ui2.xml >/dev/null 2>&1
+
 # 4. Stop, then Join: must not crash even with no host or Bluetooth around.
 read -r x1 y1 x2 y2 < <(grep -o 'text="Stop"[^>]*' /tmp/ui2.xml | grep -o 'bounds="[^"]*"' | head -1 | tr -c '0-9\n' ' ')
 adb shell input tap $(( (x1 + x2) / 2 )) $(( (y1 + y2) / 2 ))

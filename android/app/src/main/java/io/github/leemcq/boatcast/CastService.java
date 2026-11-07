@@ -83,6 +83,14 @@ public class CastService extends Service {
     }
 
     static volatile boolean hosting;
+    /** This phone's own hotspot and page, for the Share tab (null when not hosting or repeating). */
+    static volatile String shareSsid, sharePass, shareUrl;
+
+    private static void setShare(String ssid, String pass, String url) {
+        shareSsid = ssid;
+        sharePass = pass;
+        shareUrl = url;
+    }
 
     private static void publish(String s, boolean r, String url) {
         status = s;
@@ -200,6 +208,7 @@ public class CastService extends Service {
     public void onDestroy() {
         stopping = true;
         hosting = false;
+        setShare(null, null, null);
         server.stop();
         bg.removeCallbacksAndMessages(null);
         bg.post(() -> {
@@ -294,6 +303,7 @@ public class CastService extends Service {
         server.stop();
         radio.stopServingCredentials();
         radio.stopAdvertising();
+        setShare(null, null, null);
         if (!isHost()) {
             repeating = false;
             relayUpstream = null;
@@ -366,6 +376,7 @@ public class CastService extends Service {
             // cannot happen with strings and ints
         }
         String join = "http://" + apIp + ":" + PORT + "/";
+        setShare(apSsid, apPass, join);
         if (isHost()) {
             hotspotRestarts.clear();
             publish("Hosting\nWi-Fi: " + apSsid + "\nPhones open: " + join, true,
@@ -611,6 +622,7 @@ public class CastService extends Service {
     private void stopRepeating(String why) {
         if (!repeating && reservation == null) return;
         Log.i(TAG, "mesh: stop repeating: " + why);
+        setShare(null, null, null);
         server.stop();
         radio.stopServingCredentials();
         radio.stopAdvertising();

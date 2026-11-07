@@ -50,6 +50,11 @@ public class MainActivity extends Activity implements CastService.Listener {
     private TextView status;
     private Button hostBtn, relayBtn, slidesBtn, stopBtn;
     private WebView web;
+    private LinearLayout tabs;
+    private Button tabMain, tabPhones, tabShare;
+    private String pageFromService;
+    /** 0 = controls (or slides when joined), 1 = what phones see, 2 = share */
+    private int tab;
     private String shownUrl;
     private Runnable afterPermission;
 
@@ -85,11 +90,34 @@ public class MainActivity extends Activity implements CastService.Listener {
         stopBtn = button("Stop", v -> stopService(new Intent(this, CastService.class)));
         root.addView(row(slidesBtn, stopBtn));
 
+        tabMain = button("Controls", v -> showTab(0));
+        tabPhones = button("Phones see", v -> showTab(1));
+        tabShare = button("Share", v -> showTab(2));
+        tabs = new LinearLayout(this);
+        tabs.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        tabs.addView(tabMain, tp);
+        tabs.addView(tabPhones, new LinearLayout.LayoutParams(tp));
+        tabs.addView(tabShare, new LinearLayout.LayoutParams(tp));
+        tabs.setVisibility(View.GONE);
+        tabMain.setEnabled(false);
+        root.addView(tabs);
+
         web = new WebView(this);
         WebSettings ws = web.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
-        web.setWebViewClient(new WebViewClient());
+        web.setWebViewClient(new WebViewClient() {
+            @Override
+            @SuppressWarnings("deprecation")
+            public boolean shouldOverrideUrlLoading(WebView v, String url) {
+                if ("boatcast:share".equals(url)) {
+                    shareJoinDetails();
+                    return true;
+                }
+                return false;
+            }
+        });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
         lp.topMargin = dp(8);
@@ -134,20 +162,79 @@ public class MainActivity extends Activity implements CastService.Listener {
     }
 
     @Override
-    public void onStatus(String text, boolean running, String consoleUrl) {
+    public void onStatus(String text, boolean running, String pageUrl) {
         status.setText(text);
         hostBtn.setEnabled(!running);
         relayBtn.setEnabled(!running);
         stopBtn.setEnabled(running);
-        if (consoleUrl != null) {
-            if (!consoleUrl.equals(shownUrl)) {
-                shownUrl = consoleUrl;
-                web.loadUrl(consoleUrl); // the service only reports it once the server answers
+        pageFromService = pageUrl;
+        boolean sharing = CastService.shareUrl != null;
+        tabs.setVisibility(sharing ? View.VISIBLE : View.GONE);
+        tabMain.setText(CastService.hosting ? "Controls" : "Slides");
+        if (!sharing) tab = 0;
+        if (tab != 0) return; // the other tabs stay as they are until tapped
+        if (pageUrl != null) {
+            if (!pageUrl.equals(shownUrl)) {
+                shownUrl = pageUrl;
+                web.loadUrl(pageUrl); // the service only reports it once the server answers
             }
         } else if (shownUrl != null || web.getUrl() == null || !running) {
             shownUrl = null;
             web.loadDataWithBaseURL(null, HELP, "text/html", "utf-8", null);
         }
+    }
+
+    /** Controls (or the slides), exactly what the phones see, or the codes to share. */
+    private void showTab(int t) {
+        tab = t;
+        tabMain.setEnabled(t != 0);
+        tabPhones.setEnabled(t != 1);
+        tabShare.setEnabled(t != 2);
+        String local = "http://127.0.0.1:" + CastService.PORT + "/";
+        if (t == 0) {
+            shownUrl = pageFromService;
+            if (pageFromService != null) web.loadUrl(pageFromService);
+        } else if (t == 1) {
+            shownUrl = local;
+            web.loadUrl(local); // the same page, served the same way, as on every phone
+        } else {
+            shownUrl = "share";
+            web.loadDataWithBaseURL(local, shareHtml(), "text/html", "utf-8", null);
+        }
+    }
+
+    private static String esc(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
+    }
+
+    private static String shareHtml() {
+        String ssid = esc(CastService.shareSsid), pass = esc(CastService.sharePass), url = esc(CastService.shareUrl);
+        long t = System.currentTimeMillis();
+        return "<!doctype html><meta name=viewport content='width=device-width'>"
+                + "<style>body{font:17px/1.4 system-ui,sans-serif;background:#111318;color:#e6e8ec;margin:0;padding:8px;text-align:center}"
+                + "h3{margin:14px 0 6px}img{width:72%;max-width:320px;background:#fff;padding:10px;border-radius:12px}"
+                + ".big{font-size:22px;font-weight:600;word-break:break-all;margin:6px 0}.q{color:#aab}"
+                + "a.b{display:block;margin:18px auto 8px;max-width:340px;padding:14px;border-radius:12px;background:#2f6fe0;"
+                + "color:#fff;text-decoration:none;font-weight:600}</style>"
+                + "<h3>1 · Join the Wi-Fi</h3><img src='/qr/wifi.svg?t=" + t + "' alt='Wi-Fi code'>"
+                + "<div class=q>Wi-Fi</div><div class=big>" + ssid + "</div>"
+                + "<div class=q>Password</div><div class=big>" + pass + "</div>"
+                + "<h3>2 · Open the slides</h3><img src='/qr/url.svg?t=" + t + "' alt='Page code'>"
+                + "<div class=big>" + url + "</div>"
+                + "<p class=q>Turn mobile data off if the page does not open.</p>"
+                + "<a class=b href='boatcast:share'>Send these details</a>";
+    }
+
+    /** Android share sheet: WhatsApp, SMS, Bluetooth, nearby share… */
+    private void shareJoinDetails() {
+        if (CastService.shareUrl == null) return;
+        String text = "Join Boatcast\n1. Wi-Fi: " + CastService.shareSsid
+                + "\n   Password: " + CastService.sharePass
+                + "\n2. Open: " + CastService.shareUrl
+                + "\n(Turn mobile data off if the page does not open.)";
+        Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text);
+        startActivity(Intent.createChooser(send, "Send join details"));
     }
 
     private Button button(String label, View.OnClickListener l) {
