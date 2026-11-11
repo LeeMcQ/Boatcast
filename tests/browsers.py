@@ -81,9 +81,9 @@ def console_checks(browser, binary, port):
                 con.fill("#wifiPass", "s3cretPassw0rd")
                 con.click("#wifiBtn")
                 ok = shown(con, "(function(i){return i.complete && i.naturalWidth>0})(document.getElementById('qrWifi'))", 8000)
-                body = con.evaluate("document.body.innerText")
-                check("chromium", f"console {name}: Wi-Fi QR loads and password not shown",
-                      ok is not None and "s3cretPassw0rd" not in body and con.input_value("#wifiPass") == "")
+                shown_pass = shown(con, "document.getElementById('wpass').textContent.indexOf('s3cretPassw0rd')>=0", 6000)
+                check("chromium", f"console {name}: Wi-Fi QR loads and the presenter sees the password under it",
+                      ok is not None and shown_pass is not None and con.input_value("#wifiPass") == "")
                 time.sleep(2.5)  # let the test finish and the table render
                 con.screenshot(path=shot, full_page=True)
                 check("chromium", f"console {name}: no uncaught page errors", not errs, "; ".join(errs))

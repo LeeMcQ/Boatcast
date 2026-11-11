@@ -379,7 +379,10 @@ public class CastService extends Service {
         setShare(apSsid, apPass, join);
         if (isHost()) {
             hotspotRestarts.clear();
-            publish("Hosting\nWi-Fi: " + apSsid + "\nPhones open: " + join, true,
+            String wifiLine = apSsid == null
+                    ? "This phone did not tell the app its hotspot name and password. Note the phone model so this can be fixed."
+                    : "Wi-Fi: " + apSsid + "\nPassword: " + (apPass == null ? "(none)" : apPass);
+            publish("Hosting. Codes to scan are under Share.\n" + wifiLine + "\nPhones open: " + join, true,
                     "http://127.0.0.1:" + PORT + "/console.html");
             notifyText("Hosting · Wi-Fi " + apSsid);
             bg.removeCallbacks(hostTick);
@@ -702,16 +705,29 @@ public class CastService extends Service {
     private static String[] credentials(WifiManager.LocalOnlyHotspotReservation r) {
         String ssid = null, pass = null;
         if (Build.VERSION.SDK_INT >= 30) {
-            SoftApConfiguration c = r.getSoftApConfiguration();
-            if (c != null) {
-                ssid = c.getSsid();
-                pass = c.getPassphrase();
+            try {
+                SoftApConfiguration c = r.getSoftApConfiguration();
+                if (c != null) {
+                    ssid = c.getSsid();
+                    pass = c.getPassphrase();
+                    if (ssid == null && Build.VERSION.SDK_INT >= 33 && c.getWifiSsid() != null) {
+                        ssid = c.getWifiSsid().toString(); // quoted when it is plain text
+                    }
+                }
+            } catch (RuntimeException e) {
+                Log.w(TAG, "hotspot details (new API): " + e);
             }
-        } else {
-            WifiConfiguration c = r.getWifiConfiguration();
-            if (c != null) {
-                ssid = c.SSID;
-                pass = c.preSharedKey;
+        }
+        if (ssid == null || pass == null) {
+            // Some phones only answer through the older call.
+            try {
+                WifiConfiguration c = r.getWifiConfiguration();
+                if (c != null) {
+                    if (ssid == null) ssid = c.SSID;
+                    if (pass == null) pass = c.preSharedKey;
+                }
+            } catch (RuntimeException e) {
+                Log.w(TAG, "hotspot details (old API): " + e);
             }
         }
         return new String[] {unquote(ssid), unquote(pass)};

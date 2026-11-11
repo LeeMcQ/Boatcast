@@ -91,7 +91,7 @@ a.lnk{color:var(--acc);cursor:pointer;font-size:.85rem}
     <section>
       <h2>Join codes</h2>
       <div class="qrs">
-        <div><img id="qrWifi" alt="Wi-Fi QR code"><p id="ssid">Wi-Fi</p></div>
+        <div><img id="qrWifi" alt="Wi-Fi QR code"><p id="ssid">Wi-Fi</p><p id="wpass" style="margin-top:.1rem"></p></div>
         <div><img id="qrUrl" alt="Page QR code"><p id="url2"></p></div>
       </div>
       <div class="row"><button id="cardBtn" style="flex:1">Show join card full screen</button></div>
@@ -126,7 +126,7 @@ a.lnk{color:var(--acc);cursor:pointer;font-size:.85rem}
 <div id="card" title="Click to close">
   <h1>Follow along on your phone</h1>
   <div class="two">
-    <figure><img id="cWifi" alt=""><figcaption>1 · Join Wi-Fi <b id="cSsid"></b></figcaption></figure>
+    <figure><img id="cWifi" alt=""><figcaption>1 · Join Wi-Fi <b id="cSsid"></b><br><span id="cPass"></span></figcaption></figure>
     <figure><img id="cUrl" alt=""><figcaption>2 · Open <b id="cUrlText"></b></figcaption></figure>
   </div>
   <p>Turn mobile data off if the page does not open.</p>
@@ -208,6 +208,7 @@ a.lnk{color:var(--acc);cursor:pointer;font-size:.85rem}
       $("wifiChg").hidden = !st.wifi_qr;
       if (!st.wifi_qr) $("wifiForm").hidden = false; else if (!wifiEdit) $("wifiForm").hidden = true;
       $("ssid").textContent = st.ssid ? "Wi-Fi: " + st.ssid : "Enter the Wi-Fi name below to show this code";
+      $("wpass").textContent = st.ssid ? (st.wifi_pass ? "Password: " + st.wifi_pass : st.wifi_qr && st.auth !== "pin" ? "No password" : "") : "";
       $("blankBtn").classList.toggle("on", !!st.blank);
       $("liveText").placeholder = st.text ? "Showing: " + st.text : "Short notice or interpretation line";
       if (st.deck !== deckVer) await loadDeck(); else { markList(); renderNow(); }
@@ -307,6 +308,7 @@ a.lnk{color:var(--acc);cursor:pointer;font-size:.85rem}
   };
   $("cardBtn").onclick = () => {
     $("cSsid").textContent = st && st.ssid ? st.ssid : "";
+    $("cPass").textContent = st && st.wifi_pass ? "Password: " + st.wifi_pass : "";
     $("cUrlText").textContent = st ? st.url : "";
     loadQrs(); $("card").classList.add("open");
   };

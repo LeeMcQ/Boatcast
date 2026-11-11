@@ -114,6 +114,7 @@ check "test marks itself finished"              '[[ $(curl -s $H/api/test) == *"
 check "relay does not hold test results (409)"  '[[ $(curl -s -o /dev/null -w "%{http_code}" $R/api/test) == 409 ]]'
 # Wi-Fi details typed into the console at runtime
 curl -s -X POST $H/control -d '{"action":"wifi","ssid":"Typed Net","pass":"typedpass1"}' >/dev/null
+check "presenter can read the Wi-Fi password, the LAN cannot" '[[ $(curl -s $H/status) == *"\"wifi_pass\":\"typedpass1\""* && $(curl -s http://$LANIP:18080/status) == *"\"wifi_pass\":null"* ]]'
 check "Wi-Fi name set from the console"         '[[ $(curl -s $H/status) == *"\"ssid\":\"Typed Net\""* && $(curl -s $H/qr/wifi.svg) == *"<svg"* ]]'
 curl -s -X POST $H/control -d '{"action":"wifi","ssid":""}' >/dev/null
 check "clearing the Wi-Fi name removes the code" '[[ $(curl -s $H/status) == *"\"wifi_qr\":false"* && $(curl -s -o /dev/null -w "%{http_code}" $H/qr/wifi.svg) == 404 ]]'

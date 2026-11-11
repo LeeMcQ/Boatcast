@@ -377,6 +377,8 @@ fn status(hub: &Hub, req: &Request, peer: &SocketAddr) -> Value {
         "url": hub.cfg.page_url(),
         "ssid": hub.wifi.lock().unwrap().as_ref().map(|(s, _)| s.clone()),
         "wifi_qr": hub.wifi.lock().unwrap().is_some(),
+        // The presenter (this device, or a correct PIN) may read the password out to people whose cameras don't scan codes.
+        "wifi_pass": if auth == "local" || auth == "pin-ok" { hub.wifi.lock().unwrap().as_ref().and_then(|(_, p)| p.clone()) } else { None },
         "upstream": hub.upstream.lock().unwrap().as_ref().map(|(h, p)| json!({"url": format!("http://{h}:{p}"), "connected": hub.upstream_ok.load(SeqCst)})),
         "depth": match hub.depth.load(SeqCst) { u32::MAX => Value::Null, d => json!(d) },
         "mesh": hub.mesh.load(SeqCst),

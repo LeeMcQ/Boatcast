@@ -90,6 +90,17 @@ public class MainActivity extends Activity implements CastService.Listener {
         stopBtn = button("Stop", v -> stopService(new Intent(this, CastService.class)));
         root.addView(row(slidesBtn, stopBtn));
 
+        // The phone's own camera reads Wi-Fi and page codes; this is a shortcut to it.
+        Button scanBtn = button("Scan a join code (opens the camera)", v -> {
+            try {
+                startActivity(new Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA));
+            } catch (RuntimeException e) {
+                status.setText("Open the phone's camera and point it at the code.");
+            }
+        });
+        scanBtn.setTextSize(15);
+        root.addView(scanBtn);
+
         tabMain = button("Controls", v -> showTab(0));
         tabPhones = button("Phones see", v -> showTab(1));
         tabShare = button("Share", v -> showTab(2));
