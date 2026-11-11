@@ -196,13 +196,17 @@ jobs:
     # Every push to main that passes the Android tests replaces boatcast.apk on the site,
     # so https://leemcq.github.io/Boatcast/boatcast.apk always serves the latest build.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [android, android-emulator, browsers]
+    needs: [android, android-emulator, browsers, desktop]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: boatcast-android
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: boatcast-tls-x86_64-pc-windows-msvc
           path: dist
       - name: Refuse an APK signed with a throwaway key
         run: |
@@ -213,11 +217,12 @@ jobs:
       - name: Commit boatcast.apk
         run: |
           cp dist/boatcast.apk boatcast.apk
+          cp dist/boatcast-tls-x86_64-pc-windows-msvc.exe boatcast.exe
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add boatcast.apk
-          if git diff --cached --quiet; then echo "APK unchanged"; exit 0; fi
-          git commit -m "Website APK from ${GITHUB_SHA::7} [skip ci]"
+          git add boatcast.apk boatcast.exe
+          if git diff --cached --quiet; then echo "APK and Windows program unchanged"; exit 0; fi
+          git commit -m "Website APK and Windows program from ${GITHUB_SHA::7} [skip ci]"
           for i in 1 2 3; do git pull --rebase -q origin main && git push -q origin HEAD:main && exit 0; sleep 5; done
           exit 1
 
