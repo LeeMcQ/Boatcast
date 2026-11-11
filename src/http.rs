@@ -9,6 +9,8 @@ const MAX_BODY: usize = 256 * 1024;
 pub struct Request {
     pub method: String,
     pub path: String,
+    /// Text after `?` in the request target ("" if none).
+    pub query: String,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
 }
@@ -59,7 +61,8 @@ pub async fn read_request<R: AsyncRead + Unpin>(r: &mut R, buf: &mut Vec<u8>) ->
     let mut parts = first.split(' ');
     let method = parts.next().unwrap_or("").to_string();
     let target = parts.next().unwrap_or("/");
-    let path = target.split_once('?').map(|(p, _)| p).unwrap_or(target);
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    let query = query.to_string();
     let headers: Vec<(String, String)> = lines
         .filter_map(|l| l.split_once(':'))
         .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))
@@ -85,6 +88,7 @@ pub async fn read_request<R: AsyncRead + Unpin>(r: &mut R, buf: &mut Vec<u8>) ->
     Ok(Some(Request {
         method,
         path: path.to_string(),
+        query,
         headers,
         body,
     }))
@@ -150,4 +154,19 @@ pub async fn get(host: &str, port: u16, path: &str) -> io::Result<(u16, Vec<u8>)
     let head = String::from_utf8_lossy(&all[..end]);
     let code = head.split(' ').nth(1).and_then(|c| c.parse().ok()).unwrap_or(0);
     Ok((code, all[end + 4..].to_vec()))
+}
+
+/// Plain JSON POST used by relays to pass a phone's test reply up to the host. The reply is not read.
+pub async fn post(host: &str, port: u16, path: &str, body: &[u8]) -> io::Result<()> {
+    let mut s = tokio::net::TcpStream::connect((host, port)).await?;
+    s.set_nodelay(true).ok();
+    let head = format!(
+        "POST {path} HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    s.write_all(head.as_bytes()).await?;
+    s.write_all(body).await?;
+    let mut sink = [0u8; 256];
+    let _ = s.read(&mut sink).await;
+    Ok(())
 }

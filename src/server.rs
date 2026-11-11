@@ -50,10 +50,12 @@ where
         first = false;
         if req.method == "GET" && req.path == "/events" && !foreign_host(&hub, &req) {
             let is_relay = req.header("x-boatcast-relay").is_some();
+            // The host's own preview of the viewer page is not one of the phones.
+            let observer = req.query.split('&').any(|q| q == "observer=1" || q == "observer");
             // Free the request buffers: a phone may hold this stream for hours.
             drop(req);
             drop(buf);
-            return sse(hub, stream, peer, is_relay).await;
+            return sse(hub, stream, peer, is_relay, observer).await;
         }
         match route(&hub, &req, &mut stream, peer).await {
             Ok(true) if !req.wants_close() => continue,
@@ -63,24 +65,26 @@ where
 }
 
 /// One phone's live stream: policy, snapshot, then every state change and a keepalive.
-async fn sse<S>(hub: Arc<Hub>, stream: S, peer: SocketAddr, is_relay: bool)
+async fn sse<S>(hub: Arc<Hub>, stream: S, peer: SocketAddr, is_relay: bool, observer: bool)
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    struct Count(Arc<Hub>, bool);
+    struct Count(Arc<Hub>, bool, bool);
     impl Drop for Count {
         fn drop(&mut self) {
-            self.0.clients.fetch_sub(1, SeqCst);
+            if !self.2 {
+                self.0.clients.fetch_sub(1, SeqCst);
+            }
             if self.1 {
                 self.0.relays.fetch_sub(1, SeqCst);
             }
         }
     }
-    let n = hub.clients.fetch_add(1, SeqCst) + 1;
+    let n = if observer { hub.clients.load(SeqCst) } else { hub.clients.fetch_add(1, SeqCst) + 1 };
     if is_relay {
         hub.relays.fetch_add(1, SeqCst);
     }
-    let _count = Count(hub.clone(), is_relay);
+    let _count = Count(hub.clone(), is_relay, observer);
     let (mut rd, mut wr) = tokio::io::split(stream);
     if n > hub.cfg.max_clients {
         let _ = respond(&mut wr, 503, &[("Retry-After", String::from("10"))], b"full", false).await;
@@ -89,7 +93,8 @@ where
     if hub.cfg.captive {
         hub.joined.lock().unwrap().insert(peer.ip());
     }
-    let (mut rx, mut tick) = hub.subscribe();
+    let (mut rx, mut tick, mut probe) = hub.subscribe();
+    probe.borrow_and_update(); // a probe sent before this phone connected is not for it
     let p = hub.policy();
     let snapshot = rx.borrow_and_update().clone();
     tick.borrow_and_update();
@@ -115,6 +120,11 @@ where
             r = tick.changed() => {
                 if r.is_err() { break; }
                 if !write_to(&mut wr, b"event: ping\ndata: 1\n\n").await { break; }
+            }
+            r = probe.changed() => {
+                if r.is_err() { break; }
+                let b = probe.borrow_and_update().clone();
+                if !write_to(&mut wr, &b).await { break; }
             }
             r = rd.read(&mut junk) => {
                 if matches!(r, Ok(0) | Err(_)) { break; }
@@ -245,11 +255,24 @@ pub async fn route<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, req: &Request, w: &mut
             let d = hub.deck();
             return send_asset(w, req, &d.full_json, "no-cache").await;
         }
+        if path == "/api/test" {
+            if hub.cfg.relay {
+                return send_json(w, 409, &json!({"error": "this is a relay; test results are on the host console"})).await;
+            }
+            if !authorised(hub, req, &peer, &Value::Null) {
+                return send_json(w, 403, &json!({"error": "pin required"})).await;
+            }
+            return send_json(w, 200, &hub.test_results()).await;
+        }
         if path == "/status" {
             return send_json(w, 200, &status(hub, req, &peer)).await;
         }
         if path == "/qr/url.svg" || path == "/qr/wifi.svg" {
-            let data = if path == "/qr/url.svg" { Some(hub.cfg.page_url()) } else { hub.cfg.wifi_qr_text() };
+            let data = if path == "/qr/url.svg" {
+                Some(hub.cfg.page_url())
+            } else {
+                hub.wifi.lock().unwrap().as_ref().map(|(s, p)| crate::config::wifi_qr_text(s, p.as_deref()))
+            };
             return match data.and_then(|d| qr_svg(&d)) {
                 Some(svg) => {
                     let h = [("Content-Type", String::from("image/svg+xml")), ("Cache-Control", String::from("no-store"))];
@@ -258,6 +281,28 @@ pub async fn route<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, req: &Request, w: &mut
                 None => send_json(w, 404, &json!({"error": "set --wifi-ssid (and --wifi-pass) for the Wi-Fi code"})).await,
             };
         }
+    }
+    if req.method == "POST" && path == "/api/ack" {
+        // A viewer page answering a delivery-test probe. Tiny, unauthenticated, bounded.
+        let mut body: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+        if body.is_object() {
+            if hub.cfg.relay {
+                // Pass it up towards the host, one hop further away, without making the phone wait.
+                if body["ua"].as_str().is_none() {
+                    body["ua"] = json!(req.header("user-agent").unwrap_or(""));
+                }
+                body["hops"] = json!(body["hops"].as_u64().unwrap_or(0) + 1);
+                if let Some((host, port)) = hub.upstream.lock().unwrap().clone() {
+                    tokio::spawn(async move {
+                        let _ = crate::http::post(&host, port, "/api/ack", body.to_string().as_bytes()).await;
+                    });
+                }
+            } else {
+                hub.test_ack(&body, peer.ip(), req.header("user-agent"));
+            }
+        }
+        respond(w, 204, &[("Cache-Control", String::from("no-store"))], b"", false).await?;
+        return Ok(true);
     }
     if req.method == "POST" && (path == "/control" || path == "/next") {
         let body: Value = if path == "/next" {
@@ -330,8 +375,8 @@ fn status(hub: &Hub, req: &Request, peer: &SocketAddr) -> Value {
         "deck": ver,
         "uptime_s": hub.started.elapsed().as_secs(),
         "url": hub.cfg.page_url(),
-        "ssid": hub.cfg.wifi_ssid,
-        "wifi_qr": hub.cfg.wifi_ssid.is_some(),
+        "ssid": hub.wifi.lock().unwrap().as_ref().map(|(s, _)| s.clone()),
+        "wifi_qr": hub.wifi.lock().unwrap().is_some(),
         "upstream": hub.upstream.lock().unwrap().as_ref().map(|(h, p)| json!({"url": format!("http://{h}:{p}"), "connected": hub.upstream_ok.load(SeqCst)})),
         "depth": match hub.depth.load(SeqCst) { u32::MAX => Value::Null, d => json!(d) },
         "mesh": hub.mesh.load(SeqCst),

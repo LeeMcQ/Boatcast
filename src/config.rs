@@ -42,6 +42,8 @@ pub struct Config {
     pub captive: bool,
     pub max_clients: usize,
     pub mesh_id: Option<u16>,
+    /// Started with no options (double-clicked): friendlier defaults, set in main.
+    pub simple: bool,
     pub threads: usize,
     pub upstream: Option<(String, u16)>,
     pub upstream_url: Option<String>,
@@ -74,6 +76,7 @@ impl Config {
             captive: false,
             max_clients: 2000,
             mesh_id: None,
+            simple: false,
             threads: 1,
             upstream: None,
             upstream_url: None,
@@ -172,17 +175,18 @@ impl Config {
         if self.port == 80 { format!("http://{ip}/") } else { format!("http://{ip}:{}/", self.port) }
     }
 
-    pub fn wifi_qr_text(&self) -> Option<String> {
-        let esc = |s: &str| {
-            s.chars()
-                .flat_map(|c| if "\\;,:\"".contains(c) { vec!['\\', c] } else { vec![c] })
-                .collect::<String>()
-        };
-        let ssid = self.wifi_ssid.as_ref()?;
-        Some(match &self.wifi_pass {
-            Some(p) => format!("WIFI:T:WPA;S:{};P:{};;", esc(ssid), esc(p)),
-            None => format!("WIFI:T:nopass;S:{};;", esc(ssid)),
-        })
+}
+
+/// The text a phone camera understands as "join this Wi-Fi".
+pub fn wifi_qr_text(ssid: &str, pass: Option<&str>) -> String {
+    let esc = |s: &str| {
+        s.chars()
+            .flat_map(|c| if "\\;,:\"".contains(c) { vec!['\\', c] } else { vec![c] })
+            .collect::<String>()
+    };
+    match pass {
+        Some(p) => format!("WIFI:T:WPA;S:{};P:{};;", esc(ssid), esc(p)),
+        None => format!("WIFI:T:nopass;S:{};;", esc(ssid)),
     }
 }
 

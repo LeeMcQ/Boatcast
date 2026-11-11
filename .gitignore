@@ -6,3 +6,4 @@ android/app/src/main/jniLibs/
 android/local.properties
 *.iml
 .idea/
+__pycache__/

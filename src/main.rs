@@ -15,8 +15,18 @@ use std::{sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 
 fn main() {
-    let cfg = match Config::from_args(std::env::args().skip(1).collect()) {
-        Ok(c) => c,
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // Started with no options (double-clicked on a laptop): use the "slides" folder beside
+    // the program, open the console in the browser, and keep the window open on errors.
+    let simple = args.is_empty();
+    let cfg = match Config::from_args(args) {
+        Ok(mut c) => {
+            if simple {
+                c.simple = true;
+                c.deck_dir = slides_folder();
+            }
+            c
+        }
         Err(e) => {
             if e.is_empty() {
                 print!("{HELP}");
@@ -34,12 +44,37 @@ fn main() {
     .expect("runtime");
     if let Err(e) = rt.block_on(run(cfg)) {
         eprintln!("error: {e}");
+        if simple {
+            eprintln!("\nIs Boatcast already running? Close the other window first. Press Enter to close this one.");
+            let _ = std::io::stdin().read_line(&mut String::new());
+        }
         std::process::exit(1);
     }
 }
 
+/// The "slides" folder next to the program, created if missing so there is an obvious place for slides.
+fn slides_folder() -> Option<std::path::PathBuf> {
+    let dir = std::env::current_exe().ok()?.parent()?.join("slides");
+    if !dir.is_dir() {
+        std::fs::create_dir(&dir).ok()?;
+    }
+    Some(dir)
+}
+
+/// Opens the presenter console in the default browser (laptops only; best effort).
+fn open_browser(url: &str) {
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("cmd").args(["/C", "start", "", url]).spawn();
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let _ = url;
+}
+
 async fn run(cfg: Config) -> Result<(), String> {
     let deck = match &cfg.deck_dir {
+        // Double-click start: an empty or unreadable "slides" folder falls back to the sample slides.
+        Some(dir) if cfg.simple => Deck::from_dir(dir).unwrap_or_else(|_| Deck::demo()),
         Some(dir) => Deck::from_dir(dir)?,
         None => Deck::demo(),
     };
@@ -75,8 +110,18 @@ async fn run(cfg: Config) -> Result<(), String> {
     }
     eprintln!("  phones open:   {}", cfg.page_url());
     eprintln!("  console:       http://127.0.0.1:{}/console", cfg.port);
-    if cfg.wifi_ssid.is_none() {
-        eprintln!("  (add --wifi-ssid and --wifi-pass to show the Wi-Fi QR code in the console)");
+    if cfg.wifi_ssid.is_none() && !cfg.relay {
+        eprintln!("  (type the Wi-Fi name and password in the console to show the Wi-Fi QR code)");
+    }
+    if cfg.simple {
+        if let Some(d) = &cfg.deck_dir {
+            eprintln!("  slides folder: {} (add images or slides.txt, then press Reload in the console)", d.display());
+        }
+        if cfg!(target_os = "windows") {
+            eprintln!("  If Windows asks about the firewall, tick BOTH Private and Public networks and allow access.");
+        }
+        eprintln!("  Keep this window open while presenting.");
+        open_browser(&format!("http://127.0.0.1:{}/console", cfg.port));
     }
     if cfg.relay {
         tokio::spawn(relay::run(hub.clone()));

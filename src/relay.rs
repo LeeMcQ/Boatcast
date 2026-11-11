@@ -99,6 +99,9 @@ async fn follow(hub: &Arc<Hub>, host: &str, port: u16) -> io::Result<()> {
             if event == "ping" {
                 learn_depth(hub, host, port).await; // depth can change when an ancestor re-parents
             }
+            if event == "probe" && !data.is_empty() {
+                hub.relay_probe(&data);
+            }
             if event == "state" && !data.is_empty() {
                 on_state(hub, host, port, &data).await;
             }

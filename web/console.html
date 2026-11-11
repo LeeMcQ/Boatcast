@@ -15,7 +15,7 @@ header{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1.2rem;padding:.
 header b{font-size:1.05rem}
 .pill{font-size:.85rem;color:var(--dim)} .pill strong{color:var(--fg)}
 main{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:1rem;padding:1rem;max-width:1400px;margin:auto}
-@media (max-width:820px){main{grid-template-columns:1fr}}
+@media (max-width:820px){main{grid-template-columns:minmax(0,1fr)}}
 section{background:var(--panel);border:1px solid var(--line);border-radius:.8rem;padding:.9rem}
 h2{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:0 0 .6rem}
 #now{min-height:12rem;display:flex;align-items:center;justify-content:center;text-align:center;white-space:pre-wrap;font-size:1.5rem;line-height:1.3;background:#000;border-radius:.6rem;padding:1rem;overflow:hidden}
@@ -46,6 +46,17 @@ textarea{min-height:8rem;resize:vertical}
 #card figure{margin:0;text-align:center} #card img{width:min(38vw,60vh)} #card figcaption{font-size:clamp(1rem,2.4vw,1.8rem);margin-top:.5rem}
 #card h1{margin:0;font-size:clamp(1.4rem,3.5vw,3rem)}
 #msg{position:fixed;left:50%;bottom:1rem;transform:translateX(-50%);background:var(--bad);color:#fff;padding:.6rem 1rem;border-radius:.5rem;display:none}
+[hidden]{display:none!important}
+.relay .hostonly{display:none}
+.vd{font-size:1.15rem;font-weight:600;line-height:1.3;margin:.2rem 0 .6rem;padding:.6rem .7rem;border-radius:.5rem;border-left:.4rem solid var(--dim);background:#0d1014}
+.vd.ok{border-color:var(--ok);color:var(--ok)}.vd.warn{border-color:var(--warn);color:var(--warn)}.vd.bad{border-color:var(--bad);color:var(--bad)}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.8rem}
+th,td{text-align:right;padding:.25rem .4rem;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--dim);font-weight:500}
+small.d{display:block;color:var(--dim);font-size:.8rem;margin-top:.4rem}
+a.lnk{color:var(--acc);cursor:pointer;font-size:.85rem}
 .relay #ctrlPanel button,.relay #textPanel button{pointer-events:none;opacity:.4}
 </style>
 </head>
@@ -84,6 +95,22 @@ textarea{min-height:8rem;resize:vertical}
         <div><img id="qrUrl" alt="Page QR code"><p id="url2"></p></div>
       </div>
       <div class="row"><button id="cardBtn" style="flex:1">Show join card full screen</button></div>
+      <div class="hostonly">
+        <div id="wifiChg" hidden style="margin-top:.5rem"><a class="lnk" id="wifiChgLink">Change Wi-Fi name or password</a></div>
+        <div id="wifiForm">
+          <input id="wifiName" placeholder="Wi-Fi name" autocomplete="off" autocapitalize="off" style="margin-top:.6rem">
+          <input id="wifiPass" type="password" placeholder="Wi-Fi password" autocomplete="off" style="margin-top:.5rem">
+          <div class="row"><button id="wifiBtn" style="flex:1">Show Wi-Fi code</button></div>
+        </div>
+      </div>
+    </section>
+    <section id="testPanel" class="hostonly" style="margin-top:1rem">
+      <h2>Delivery test</h2>
+      <div class="row" style="margin-top:0"><button id="testBtn" style="flex:1">Run test</button></div>
+      <div id="verdict" class="vd" hidden style="margin-top:.6rem"></div>
+      <div class="tw"><table id="tbl" hidden><thead><tr><th>Device</th><th>Hops</th><th>Got</th><th>Typical ms</th><th>Worst ms</th><th>Reconnects</th></tr></thead><tbody></tbody></table></div>
+      <small class="d" id="tnote" hidden>Times are there-and-back, so real delay is lower.</small>
+      <div class="row"><button id="copyBtn" hidden>Copy results</button></div>
     </section>
     <section id="textPanel" style="margin-top:1rem">
       <h2>Live text (phones only)</h2>
@@ -92,6 +119,7 @@ textarea{min-height:8rem;resize:vertical}
       <h2 style="margin-top:1rem">Type or paste slides</h2>
       <textarea id="newSlides" placeholder="One slide per block. Leave a blank line between slides.&#10;# A line starting with # becomes the slide title"></textarea>
       <div class="row"><input id="newTitle" placeholder="Deck title" style="flex:1"><button id="loadText">Load slides</button></div>
+      <div class="row hostonly"><button id="reloadBtn" style="flex:1">Reload slides from folder</button></div>
     </section>
   </div>
 </main>
@@ -109,6 +137,7 @@ textarea{min-height:8rem;resize:vertical}
   "use strict";
   const $ = (id) => document.getElementById(id);
   let pin = ""; try { pin = sessionStorage.getItem("pin") || ""; } catch (e) {}
+  let wifiEdit = false, testTimer = null, testRunning = false, lastCsv = "";
   let st = null, deck = null, deckVer = null, busy = false, lastSlide = -1, warned = false;
 
   function toast(t) { const m = $("msg"); m.textContent = t; m.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => m.style.display = "none", 3500); }
@@ -176,7 +205,9 @@ textarea{min-height:8rem;resize:vertical}
       $("url").textContent = st.url; $("url2").textContent = st.url;
       $("upPill").hidden = !st.upstream;
       if (st.upstream) $("up").textContent = st.upstream.connected ? "connected" : "reconnecting…";
-      $("ssid").textContent = st.ssid ? "Wi-Fi: " + st.ssid : "Start with --wifi-ssid to show this code";
+      $("wifiChg").hidden = !st.wifi_qr;
+      if (!st.wifi_qr) $("wifiForm").hidden = false; else if (!wifiEdit) $("wifiForm").hidden = true;
+      $("ssid").textContent = st.ssid ? "Wi-Fi: " + st.ssid : "Enter the Wi-Fi name below to show this code";
       $("blankBtn").classList.toggle("on", !!st.blank);
       $("liveText").placeholder = st.text ? "Showing: " + st.text : "Short notice or interpretation line";
       if (st.deck !== deckVer) await loadDeck(); else { markList(); renderNow(); }
@@ -190,9 +221,78 @@ textarea{min-height:8rem;resize:vertical}
   function loadQrs() {
     const t = Date.now();
     $("qrUrl").src = $("cUrl").src = "/qr/url.svg?t=" + t;
+    $("qrWifi").style.visibility = "visible";
     $("qrWifi").src = $("cWifi").src = "/qr/wifi.svg?t=" + t;
   }
   $("qrWifi").onerror = () => { $("qrWifi").style.visibility = "hidden"; };
+
+  $("wifiChgLink").onclick = () => { wifiEdit = true; $("wifiForm").hidden = false; $("wifiName").value = st && st.ssid || ""; $("wifiName").focus(); };
+  $("wifiBtn").onclick = () => {
+    const ssid = $("wifiName").value.trim(), pass = $("wifiPass").value;
+    if (!ssid) return toast("Type the Wi-Fi name first");
+    $("wifiPass").value = ""; // never kept or shown after it is sent
+    control({ action: "wifi", ssid, pass }).then(() => { wifiEdit = false; $("wifiName").value = ""; $("wifiForm").hidden = true; loadQrs(); }).catch(() => {});
+  };
+  $("reloadBtn").onclick = () => control({ action: "reload" }).then(() => loadDeck()).catch(() => {});
+
+  // Delivery test: numbered probes through the real stream; phones answer, the host reports.
+  function devLabel(ua) {
+    ua = ua || "";
+    if (/; wv\)/.test(ua)) return "Android app";
+    let os = /iPhone|iPod/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Macintosh|Mac OS X/.test(ua) ? "Mac" : /CrOS/.test(ua) ? "ChromeOS" : /Linux/.test(ua) ? "Linux" : "";
+    let br = /SamsungBrowser/.test(ua) ? "Samsung Internet" : /EdgA?\/|EdgiOS/.test(ua) ? "Edge" : /OPR\/|Opera/.test(ua) ? "Opera" : /Firefox|FxiOS/.test(ua) ? "Firefox" : /Chrome|CriOS/.test(ua) ? "Chrome" : /Safari/.test(ua) ? "Safari" : "";
+    return os && br ? os + " \u00b7 " + br : ua.slice(0, 24) || "Unknown";
+  }
+  function renderTest(j) {
+    const v = $("verdict"), tb = $("tbl"), sum = j.summary || {}, devs = (j.devices || []).slice();
+    testRunning = !!j.running;
+    $("testBtn").textContent = testRunning ? "Stop" : "Run test";
+    if (!j.run) { v.hidden = tb.hidden = true; $("tnote").hidden = $("copyBtn").hidden = true; return; }
+    const n = devs.length, now = j.clients_now || 0;
+    let cls, txt;
+    if (!n) {
+      cls = now > 0 ? "bad" : "warn";
+      txt = now > 0 ? "No phones answered. Phones must reload the page once after this update." : "No phones are connected.";
+    } else {
+      const badN = devs.filter((d) => d.lost > 0).length, p95 = sum.p95_ms || 0;
+      cls = sum.lost === 0 && p95 <= 1000 ? "ok" : p95 <= 2000 ? "warn" : "bad";
+      txt = badN ? `${badN} of ${n} phone${n > 1 ? "s" : ""} missed updates.` : (n === 1 ? "The phone got every update." : `All ${n} phones got every update.`);
+      txt += ` Typical delay ${sum.median_ms} ms, worst ${sum.max_ms} ms.`;
+      if (n !== now) txt += ` ${now} connected, ${n} answered.`;
+    }
+    if (testRunning) txt = `Testing, ${j.sent} of ${j.of} sent. ` + txt;
+    v.className = "vd " + cls; v.textContent = txt; v.hidden = false;
+    devs.sort((a, b) => (b.lost - a.lost) || (b.max_ms - a.max_ms));
+    const body = tb.tBodies[0]; body.innerHTML = "";
+    const rows = devs.map((d) => [devLabel(d.ua), d.hops, d.got + "/" + j.sent, d.median_ms, d.max_ms, d.reconnects]);
+    rows.forEach((r) => { const tr = document.createElement("tr"); r.forEach((c) => { const td = document.createElement("td"); td.textContent = c; tr.appendChild(td); }); body.appendChild(tr); });
+    tb.hidden = !n; $("tnote").hidden = false; $("copyBtn").hidden = false;
+    devs.forEach((d, i) => rows[i].push(d.ua || "")); // full browser details help diagnose a failing phone
+    lastCsv = ["Device,Hops,Got,Typical ms,Worst ms,Reconnects,Details"].concat(rows.map((r) => r.map((c) => '"' + String(c).replace(/"/g, '""') + '"').join(","))).concat([txt]).join("\n");
+  }
+  async function pollTest() {
+    clearTimeout(testTimer);
+    try {
+      const r = await fetch("/api/test", { headers: { "X-Pin": pin }, cache: "no-store" });
+      if (r.ok) renderTest(await r.json());
+    } catch (e) {}
+    if (testRunning) testTimer = setTimeout(pollTest, 1000);
+  }
+  $("testBtn").onclick = () => {
+    const stopping = testRunning;
+    control(stopping ? { action: "test_stop" } : { action: "test", count: 20, gap_ms: 1500 })
+      .then(() => { testRunning = !stopping; pollTest(); }).catch(() => {});
+  };
+  $("copyBtn").onclick = () => {
+    const done = () => toast("Results copied");
+    const fb = () => {
+      const t = document.createElement("textarea"); t.value = lastCsv; t.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+      document.body.appendChild(t); t.focus(); t.select();
+      let ok = false; try { ok = document.execCommand("copy"); } catch (e) {}
+      document.body.removeChild(t); ok ? done() : toast("Could not copy");
+    };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(lastCsv).then(done, fb); else fb();
+  };
 
   $("prevBtn").onclick = () => act("prev");
   $("nextBtn").onclick = () => act("next");
@@ -220,7 +320,7 @@ textarea{min-height:8rem;resize:vertical}
   });
 
   if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/sw.js").catch(() => {});
-  loadQrs(); poll(); setInterval(poll, 2000);
+  loadQrs(); poll(); pollTest(); setInterval(poll, 2000);
 })();
 </script>
 </body>

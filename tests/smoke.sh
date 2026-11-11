@@ -84,6 +84,40 @@ check "relay refuses control (409)"  '[[ $(curl -s -o /dev/null -w "%{http_code}
 check "relay status shows upstream connected" '[[ $(curl -s $R/status) == *"\"connected\":true"* ]]'
 check "host is depth 0, relay depth 1 (mesh)" '[[ $(curl -s $H/status) == *"\"depth\":0"* && $(curl -s $R/status) == *"\"depth\":1"* ]]'
 check "host counts the relay as a child repeater" '[[ $(curl -s $H/status) == *"\"relays\":1"* ]]'
+# Delivery test: probes go down the stream (through relays), replies come back and are timed.
+check "LAN without PIN cannot read test results" '[[ $(curl -s -o /dev/null -w "%{http_code}" http://$LANIP:18080/api/test) == 403 ]]'
+(timeout 2.5 curl -sN $H/events > /tmp/sc-probe-h.txt &) ; (timeout 2.5 curl -sN $R/events > /tmp/sc-probe-r.txt &)
+(timeout 2.5 curl -sN "$H/events?observer=1" > /dev/null &)
+sleep 0.4
+before=$(curl -s $H/status | python3 -c 'import sys,json;print(json.load(sys.stdin)["clients"])')
+check "host preview (observer) is not counted as a phone" '[[ "$before" == 2 ]]'
+curl -s -X POST $H/control -d '{"action":"test","count":3,"gap_ms":300}' >/dev/null
+sleep 0.2
+run=$(curl -s $H/api/test | python3 -c 'import sys,json;print(json.load(sys.stdin)["run"])')
+curl -s -X POST $H/api/ack -H 'User-Agent: TestPhone/1' -d "{\"run\":$run,\"n\":1,\"id\":\"aaaa1111\",\"rc\":0}" >/dev/null
+curl -s -X POST $R/api/ack -H 'User-Agent: FarPhone/2' -d "{\"run\":$run,\"n\":1,\"id\":\"bbbb2222\",\"rc\":3}" >/dev/null
+curl -s -X POST $H/api/ack -d "{\"run\":999,\"n\":1,\"id\":\"cccc3333\"}" >/dev/null
+sleep 1.6
+res=$(curl -s $H/api/test)
+check "probes reach a phone on the host"        '[[ $(grep -c "event: probe" /tmp/sc-probe-h.txt) == 3 ]]'
+check "probes reach a phone behind the relay"   '[[ $(grep -c "event: probe" /tmp/sc-probe-r.txt) == 3 ]]'
+check "probes do not change the slides"         '[[ $(grep -c "event: state" /tmp/sc-probe-h.txt) == 1 ]]'
+check "test results: 3 sent, 2 phones, wrong run ignored" 'python3 -c "
+import sys,json; r=json.loads(sys.argv[1]); d={x[\"id\"]:x for x in r[\"devices\"]}
+assert r[\"sent\"]==3 and r[\"summary\"][\"devices\"]==2 and \"cccc3333\" not in d, r
+assert d[\"aaaa1111\"][\"got\"]==1 and d[\"aaaa1111\"][\"lost\"]==2 and d[\"aaaa1111\"][\"ua\"]==\"TestPhone/1\" and d[\"aaaa1111\"][\"hops\"]==0, d
+assert d[\"bbbb2222\"][\"hops\"]==1 and d[\"bbbb2222\"][\"ua\"]==\"FarPhone/2\" and d[\"bbbb2222\"][\"reconnects\"]==3, d
+assert 100 <= d[\"aaaa1111\"][\"median_ms\"] < 1500 and r[\"clients_at_start\"]==2, r
+" "$res"'
+sleep 3.2
+check "test marks itself finished"              '[[ $(curl -s $H/api/test) == *"\"running\":false"* ]]'
+check "relay does not hold test results (409)"  '[[ $(curl -s -o /dev/null -w "%{http_code}" $R/api/test) == 409 ]]'
+# Wi-Fi details typed into the console at runtime
+curl -s -X POST $H/control -d '{"action":"wifi","ssid":"Typed Net","pass":"typedpass1"}' >/dev/null
+check "Wi-Fi name set from the console"         '[[ $(curl -s $H/status) == *"\"ssid\":\"Typed Net\""* && $(curl -s $H/qr/wifi.svg) == *"<svg"* ]]'
+curl -s -X POST $H/control -d '{"action":"wifi","ssid":""}' >/dev/null
+check "clearing the Wi-Fi name removes the code" '[[ $(curl -s $H/status) == *"\"wifi_qr\":false"* && $(curl -s -o /dev/null -w "%{http_code}" $H/qr/wifi.svg) == 404 ]]'
+
 # Mesh re-parenting: a second host; the app switches the relay to it without a restart.
 $BIN --port 18082 --mesh-id 77 >/tmp/sc-host2.log 2>&1 &
 sleep 0.6

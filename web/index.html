@@ -68,7 +68,7 @@ button{font:inherit;color:inherit;background:none;border:1px solid var(--line);b
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
   };
   let deck = null, deckVer = null, loadingVer = null, live = null, view = null;
-  let es = null, lastMsg = 0, policy = { preload: "all", spread: 0 };
+  let es = null, lastMsg = 0, rc = 0, started = false, policy = { preload: "all", spread: 0 };
   let scale = store.get("scale", 1), theme = store.get("theme", "dark");
   let wantWake = store.get("wake", false), wake = null, installEvt = null;
 
@@ -155,19 +155,33 @@ button{font:inherit;color:inherit;background:none;border:1px solid var(--line);b
     if (live && live.deck !== deckVer) loadDeck(live.deck);
   }
 
+  // Observer pages (?observer=1) are not counted as phones and never answer delivery-test probes.
+  const observer = /[?&]observer=1(&|$)/.test(location.search);
+  const myId = Array.from({ length: 8 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");
   function setDot(c) { $("dot").className = c; }
   function connect() {
     try { if (es) es.close(); } catch (e) {}
     setDot("wait");
-    es = new EventSource("/events");
+    if (started) rc++;
+    started = true;
+    es = new EventSource(observer ? "/events?observer=1" : "/events");
     es.onopen = () => { lastMsg = Date.now(); setDot("ok"); };
-    es.onerror = () => setDot("wait"); // the browser retries on its own, using the server's retry hint
+    es.onerror = () => { setDot("wait"); rc++; }; // the browser retries on its own, using the server's retry hint
+    if (!observer) es.addEventListener("probe", (e) => {
+      lastMsg = Date.now();
+      let p; try { p = JSON.parse(e.data); } catch (_) { return; }
+      try {
+        fetch("/api/ack", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ run: p.run, n: p.n, id: myId, rc: rc }) }).catch(() => {});
+      } catch (_) {}
+    });
     es.addEventListener("policy", (e) => { try { policy = JSON.parse(e.data); } catch (_) {} });
     es.addEventListener("ping", () => { lastMsg = Date.now(); setDot("ok"); });
     es.addEventListener("state", (e) => {
       lastMsg = Date.now(); setDot("ok");
       let s; try { s = JSON.parse(e.data); } catch (_) { return; }
-      if (live && s.deck === live.deck && s.seq < live.seq) return; // stale (e.g. after a relay switch)
+      // Stale only within one host run; a different boot id (host restarted, seq back at 0) is always accepted.
+      if (live && s.boot !== undefined && s.boot === live.boot && s.seq < live.seq) return;
       live = s;
       if (view !== null && view === s.slide) view = null;
       loadDeck(s.deck); preNear(); render();

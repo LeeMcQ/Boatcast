@@ -196,7 +196,8 @@ public class MainActivity extends Activity implements CastService.Listener {
             if (pageFromService != null) web.loadUrl(pageFromService);
         } else if (t == 1) {
             shownUrl = local;
-            web.loadUrl(local); // the same page, served the same way, as on every phone
+            // The same page as on every phone; "observer" keeps this preview out of the phone count.
+            web.loadUrl(local + "?observer=1");
         } else {
             shownUrl = "share";
             web.loadDataWithBaseURL(local, shareHtml(), "text/html", "utf-8", null);
