@@ -412,7 +412,8 @@
     typed: function (t) { $('typed').value = t; $('typedBtn').click(); },
     phones: function () { return peers.map(function (p) { return { label: p.label, status: p.status, rtt: p.rtt.slice(), missed: p.missed, pics: p.pics, picsOf: p.picsOf }; }); },
     show: function () { return { slide: show.slide, slides: deck.slides.length }; },
-    restartCamera: function () { return startCamera(); }
+    restartCamera: function () { return startCamera(); },
+    resetStats: function () { peers.forEach(function (p) { p.rtt = []; p.missed = 0; }); }
   };
 })();
 </script>

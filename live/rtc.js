@@ -117,7 +117,7 @@
     var ctl = pc.createDataChannel('ctl', { negotiated: true, id: 0 });
     var bulk = pc.createDataChannel('bulk', { negotiated: true, id: 1 });
     bulk.binaryType = 'arraybuffer';
-    bulk.bufferedAmountLowThreshold = 256 * 1024;
+    bulk.bufferedAmountLowThreshold = 64 * 1024;
     return { ctl: ctl, bulk: bulk };
   }
 
@@ -147,9 +147,12 @@
     return { id: sig.id, code: pack('a', sig.id, pc.localDescription.sdp), pc: pc, ctl: ch.ctl, bulk: ch.bulk };
   }
 
-  /** Wait until a channel can take more without piling up memory. */
+  /**
+   * Wait until a channel can take more. Pictures and slide changes share one connection,
+   * so pictures are fed in small amounts (256 KB queued at most) to keep slide changes quick.
+   */
   function drain(dc) {
-    if (dc.bufferedAmount < 1024 * 1024) return Promise.resolve();
+    if (dc.bufferedAmount < 256 * 1024) return Promise.resolve();
     return new Promise(function (res) {
       var done = function () { dc.removeEventListener('bufferedamountlow', done); res(); };
       dc.addEventListener('bufferedamountlow', done);

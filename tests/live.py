@@ -165,13 +165,18 @@ def run_engine(p, engine):
         img_ok = all(ph.evaluate("(function(i){return !!i && i.complete && i.naturalWidth>0})(document.querySelector('#slide img'))") for ph in phones)
         check(f"{tag} the picture slide is shown on every phone", img_ok)
 
-        time.sleep(5)
+        # Delay checks while pictures were being prepared and sent (for information), then
+        # 10 s of normal running, which must stay under 1 s with nothing missed.
+        busy_rtts = [r for s in host.evaluate("__host.phones()") for r in s["rtt"]]
+        host.evaluate("__host.resetStats()")
+        time.sleep(10)
         stats = host.evaluate("__host.phones()")
         conn = [s for s in stats if s["status"] == "Connected"]
         rtts = [r for s in conn for r in s["rtt"]]
-        check(f"{tag} presenter shows 3 connected phones with delay checks, none missed",
-              len(conn) == 3 and all(s["rtt"] for s in conn) and not any(s["missed"] for s in conn),
-              f"typical {sorted(rtts)[len(rtts) // 2]:.0f} ms, worst {max(rtts):.0f} ms" if rtts else "no delay data")
+        check(f"{tag} presenter shows 3 connected phones, delay under 1 s, none missed",
+              len(conn) == 3 and all(s["rtt"] for s in conn) and not any(s["missed"] for s in conn) and rtts and max(rtts) < 1000,
+              (f"typical {sorted(rtts)[len(rtts) // 2]:.0f} ms, worst {max(rtts):.0f} ms" if rtts else "no delay data")
+              + (f"; worst while pictures loaded {max(busy_rtts):.0f} ms" if busy_rtts else ""))
 
         # A phone whose reply has no address (as when a phone hides its address and the
         # computer can't look it up): the computer's own address must be enough.
