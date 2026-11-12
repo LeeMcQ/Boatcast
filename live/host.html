@@ -238,7 +238,10 @@
     var p = pending.filter(function (x) { return x.id === sig.id; })[0];
     if (!p) { flash('That reply is from an old code. On the phone, tap "Scan the presenter\'s code again".', 'warn'); return; }
     p.used = true;
-    var peer = { added: Date.now(), id: p.id, link: p, label: 'Phone', status: 'Connecting…', cls: 'warn', rtt: [], sent: {}, missed: 0, pics: 0, picsOf: 0, n: 0 };
+    var sent = sig.cands.map(function (c) { return c.a; });
+    var hidden = sent.length && sent.every(function (a) { return /\.local$/i.test(a); });
+    if (hidden) flash('This phone hid its address. On the phone, tap "Scan the presenter\'s code again" and allow the camera.', 'warn');
+    var peer = { phoneSent: sent.length ? sent.join(' ') : 'nothing', added: Date.now(), id: p.id, link: p, label: 'Phone', status: 'Connecting…', cls: 'warn', rtt: [], sent: {}, missed: 0, pics: 0, picsOf: 0, n: 0 };
     peers.push(peer);
     hook(peer);
     try {
@@ -330,7 +333,7 @@
     peers.forEach(function (p) {
       Object.keys(p.sent).forEach(function (n) { if (now - p.sent[n] > 5000) { p.missed++; delete p.sent[n]; } });
       if (p.link.ctl.readyState !== 'open' && Date.now() - (p.added || 0) < 120000) {
-        BoatLive.diag(p.link.pc).then(function (d) { p.diag = d; renderPhones(); });
+        BoatLive.diag(p.link.pc).then(function (d) { p.diag = d + ' · phone sent ' + p.phoneSent; renderPhones(); });
       }
       if (p.link.ctl.readyState === 'open') {
         p.n++; p.sent[p.n] = now;

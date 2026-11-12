@@ -114,17 +114,17 @@
     link = null;
   }
 
-  // Browsers hide this phone's Wi-Fi address from pages without camera permission. If this
-  // page already has that permission (it scanned a code before), use it so the presenter's
-  // computer can reach the phone directly; otherwise the computer's own address is enough
-  // in most places, and "Scan again" (which uses the camera) is the fallback.
+  // Browsers hide this phone's Wi-Fi address behind a made-up ".local" name unless the page
+  // has camera permission. The computer can only turn that name back into an address if
+  // nothing blocks local name announcements, and laptop firewalls often do. So ask for the
+  // camera once (the browser remembers): then the reply carries the phone's real address.
   async function revealAddress() {
     try {
-      var st = await navigator.permissions.query({ name: 'camera' });
-      if (st.state !== 'granted') return;
+      $('busyMsg').textContent = 'Allow the camera when asked: it lets the presenter\'s computer find this phone.';
       var s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       s.getTracks().forEach(function (t) { t.stop(); });
-    } catch (e) { /* not supported here: fine */ }
+    } catch (e) { /* refused or not available: carry on, the computer's address may be enough */ }
+    $('busyMsg').textContent = 'Preparing the reply code…';
   }
 
   async function join(sig, fromScan) {
