@@ -17,6 +17,22 @@ Live slides and words from one phone or laptop to many phones over Wi-Fi. There'
  phone phone … Repeater 1a  (chains: ~10 → ~100 → ~1,000)
 ```
 
+## Boatcast Live: nothing to install
+
+The quickest way to put slides on up to a handful of phones from a computer, with no app and no program to install.
+
+1. Every device joins the **same Wi-Fi**, for example one phone's hotspot. Turn mobile data off on the phones.
+2. On the computer, open **https://leemcq.github.io/Boatcast/live/host.html** in Chrome or Edge, and allow the camera.
+3. Each phone points its camera at the code on the computer's screen. The Boatcast page opens and shows a reply code.
+4. Hold the phone's reply code up to the computer's camera. The computer beeps, and the phone shows the slides.
+
+How it works: the computer's browser links straight to each phone's browser with WebRTC, the feature video calls use. Nothing passes through a server; the website only delivers the pages, and they keep working with no internet once a device has opened them online. Pairing needs the two codes because browsers can't find each other on a network by themselves.
+
+- **Slides:** pictures (in PowerPoint: File, Export, PNG) or typed text. Pictures are resized to 1920 × 1080 before sending.
+- **Controls:** next, back, blank, and a live text line. The presenter page shows each phone's delay every 2 seconds.
+- **Limits:** a phone whose screen turns off, or whose page reloads, must scan again. Each code pairs one phone; a new code appears every 10 seconds and after each phone joins. Tested automatically with 3 phones in Chrome, Firefox and the Safari engine (`tests/live.py`), not yet on real phones.
+- **Corporate laptops:** a VPN may block devices on the same Wi-Fi from reaching each other. Disconnect it while presenting.
+
 ## Quick start
 
 ### Phone as the host (Android app)
