@@ -1,5 +1,5 @@
 // Keeps Boatcast Live working with no internet once a device has opened it online.
-var CACHE = 'boatcast-live-4';
+var CACHE = 'boatcast-live-5';
 var FILES = ['./', 'index.html', 'host.html', 'rtc.js', 'show.js', 'live.css', 'manifest.webmanifest',
   'icon-192.png', 'icon-512.png', 'vendor/qrcode.min.js', 'vendor/jsqr.min.js'];
 self.addEventListener('install', function (e) {

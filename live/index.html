@@ -134,6 +134,12 @@
     var l;
     try {
       if (!fromScan) await revealAddress();
+      // Chrome asks before a page may connect to devices on the local network.
+      if ((await BoatLive.lnaState()) === 'prompt') {
+        $('busyMsg').textContent = 'Tap Allow if the browser asks to connect to devices on your network.';
+        await BoatLive.askLna();
+      }
+      var lnaDenied = (await BoatLive.lnaState()) === 'denied';
       l = await BoatLive.answer(sig);
     } catch (e) {
       $('busyMsg').textContent = 'This code could not be used (' + e.message + '). Scan the presenter\'s code again.';
@@ -143,7 +149,8 @@
     link = l;
     $('replyQr').innerHTML = BoatLive.qrSvg(l.code);
     $('codeText').textContent = l.code;
-    $('replyMsg').textContent = '';
+    $('replyMsg').textContent = lnaDenied && location.hostname !== '127.0.0.1' && location.hostname !== 'localhost'
+      ? 'If this doesn\'t connect: tap the icon left of the address, Permissions or Site settings, allow "Local network access", then scan again.' : '';
     show('reply');
     // A presenter code can be used by one phone only; if another phone used it first, rescan.
     openTimer = setTimeout(function () {

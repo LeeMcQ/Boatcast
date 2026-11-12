@@ -39,6 +39,10 @@
   <h1>Boatcast Live · Presenter</h1>
   <span class="quiet small">Runs in this browser. Nothing to install. Keep this tab open while presenting.</span>
 </header>
+<div id="lna" class="hidden" style="background:#7c2d12;color:#fff;padding:12px 18px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+  <span id="lnaMsg" style="flex:1;min-width:240px">Chrome must allow this page to connect to devices on your network, or phones can't join.</span>
+  <button id="lnaBtn">Allow connecting to phones</button>
+</div>
 <main>
   <section class="card">
     <h2>Phones join here</h2>
@@ -409,9 +413,24 @@
     } catch (e) {}
   }
 
+  // ------------------------------------------------------------- local network permission
+  async function checkLna() {
+    var st = await BoatLive.lnaState();
+    if (/^(127\.|localhost$)/.test(location.hostname)) st = 'granted'; // a page on this computer needs no permission
+    $('lna').classList.toggle('hidden', st === 'granted' || st === 'unsupported');
+    if (st === 'denied') {
+      $('lnaMsg').textContent = 'Chrome is blocking this page from connecting to phones. Click the icon at the left of the address bar, then Site settings, and set "Local network access" to Allow. Then reload.';
+      $('lnaBtn').classList.add('hidden');
+    }
+    return st;
+  }
+  $('lnaBtn').onclick = async function () { await BoatLive.askLna(); checkLna(); };
+  setInterval(checkLna, 3000);
+
   // ------------------------------------------------------------- start
   (async function () {
     drawPreview();
+    if ((await checkLna()) === 'prompt') BoatLive.askLna().then(checkLna);
     if (!window.RTCPeerConnection) { $('camMsg').textContent = 'This browser cannot link to phones. Use Chrome, Edge, Firefox or Safari.'; return; }
     // Camera first: with camera permission, browsers put this computer's real Wi-Fi address
     // in the code, which makes the link work even where hidden addresses don't resolve.

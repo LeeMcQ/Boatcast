@@ -246,7 +246,8 @@ def run_camera(p):
                 ok = True
             except Exception:
                 ok = False
-            check("[camera] presenter's camera reads the phone's reply and they connect", ok)
+            check("[camera] presenter's camera reads the phone's reply and they connect", ok,
+                  "" if ok else str(host.evaluate("__host.phones()")) + " flash=" + host.evaluate("document.getElementById('flash').textContent") + " cam=" + host.evaluate("document.getElementById('camMsg').textContent"))
             if ok:
                 host.evaluate("__host.go(1)")
                 ph.wait_for_function("__viewer.state().slide == 1", timeout=2000)

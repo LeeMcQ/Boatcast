@@ -262,11 +262,35 @@
     } catch (e) { return ''; }
   }
 
+  /**
+   * Chrome now asks before a website may connect to devices on the local network, and that
+   * includes direct browser-to-browser links (Chrome calls it "local network access").
+   * Without it, the other device's address is silently dropped. These check and ask.
+   * Returns 'granted', 'prompt', 'denied' or 'unsupported' (older browsers: nothing needed).
+   */
+  async function lnaState() {
+    var names = ['local-network-access', 'local-network'];
+    for (var i = 0; i < names.length; i++) {
+      try { return (await navigator.permissions.query({ name: names[i] })).state; } catch (e) {}
+    }
+    return 'unsupported';
+  }
+  /** Make Chrome show its "connect to devices on your local network" prompt. */
+  async function askLna() {
+    try {
+      var ctl = new AbortController(), t = setTimeout(function () { ctl.abort(); }, 4000);
+      await fetch('http://192.168.0.1:9/', { mode: 'no-cors', cache: 'no-store', targetAddressSpace: 'local', signal: ctl.signal })
+        .catch(function () {});
+      clearTimeout(t);
+    } catch (e) {}
+    return lnaState();
+  }
+
   var BLOCKED = 'Nothing got through between this phone and the computer. This Wi-Fi keeps devices apart ' +
     '(usual on work and guest Wi-Fi), or a firewall blocks it. Use a phone\'s hotspot as the Wi-Fi instead.';
 
   g.BoatLive = {
-    why: why, diag: diag, BLOCKED: BLOCKED,
+    why: why, diag: diag, BLOCKED: BLOCKED, lnaState: lnaState, askLna: askLna,
     pack: pack, unpack: unpack, buildSdp: buildSdp, offer: offer, accept: accept, answer: answer,
     drain: drain, qrSvg: qrSvg, camera: camera, scan: scan, stopStream: stopStream, label: label
   };
