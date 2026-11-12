@@ -239,11 +239,34 @@
       return heard || answered ? 'partial' : 'blocked';
     } catch (e) { return 'unknown'; }
   }
+  /**
+   * Plain counts of the link's test messages, for the presenter's screen:
+   * "to phone N, answered M, from phone K", plus the address kinds tried.
+   */
+  async function diag(pc) {
+    try {
+      var sent = 0, resp = 0, recv = 0, loc = {}, rem = {}, ok = false;
+      var st = await pc.getStats();
+      st.forEach(function (s) {
+        if (s.type === 'candidate-pair') {
+          sent += s.requestsSent || 0; resp += s.responsesReceived || 0; recv += s.requestsReceived || 0;
+          if (s.state === 'succeeded') ok = true;
+        } else if (s.type === 'local-candidate') {
+          loc[(s.address || s.ip || '?') + (s.candidateType && s.candidateType !== 'host' ? ' (' + s.candidateType + ')' : '')] = 1;
+        } else if (s.type === 'remote-candidate') {
+          rem[(s.address || s.ip || '?') + (s.candidateType && s.candidateType !== 'host' ? ' (' + s.candidateType + ')' : '')] = 1;
+        }
+      });
+      return 'checks: sent ' + sent + ', answered ' + resp + ', received ' + recv + (ok ? ', path found' : '') +
+        ' · here ' + Object.keys(loc).join(' ') + ' · there ' + Object.keys(rem).join(' ');
+    } catch (e) { return ''; }
+  }
+
   var BLOCKED = 'Nothing got through between this phone and the computer. This Wi-Fi keeps devices apart ' +
     '(usual on work and guest Wi-Fi), or a firewall blocks it. Use a phone\'s hotspot as the Wi-Fi instead.';
 
   g.BoatLive = {
-    why: why, BLOCKED: BLOCKED,
+    why: why, diag: diag, BLOCKED: BLOCKED,
     pack: pack, unpack: unpack, buildSdp: buildSdp, offer: offer, accept: accept, answer: answer,
     drain: drain, qrSvg: qrSvg, camera: camera, scan: scan, stopStream: stopStream, label: label
   };
