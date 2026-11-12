@@ -41,6 +41,7 @@
   <div class="qr" id="replyQr"></div>
   <p class="quiet small">Hold the phone still, screen facing the computer's camera, about 30 cm away. Turn the brightness up if it doesn't read.</p>
   <p id="replyMsg" class="quiet small"></p>
+  <p id="codeDiag" class="quiet" style="font-size:12px;word-break:break-all;max-width:460px"></p>
   <details class="small quiet"><summary>The code as text</summary><p id="codeText"></p></details>
   <button class="ghost" id="rescanBtn">Scan the presenter's code again</button>
 </section>
@@ -159,6 +160,10 @@
       }
     }, 45000);
 
+    var phoneDiag = setInterval(function () {
+      if (link !== l || l.ctl.readyState === 'open') { clearInterval(phoneDiag); return; }
+      BoatLive.diag(l.pc).then(function (d) { if (link === l) $('codeDiag').textContent = d; });
+    }, 300);
     l.ctl.onopen = function () {
       if (link !== l) return;
       clearTimeout(openTimer);

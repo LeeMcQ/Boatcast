@@ -268,6 +268,10 @@
 
   function hook(peer) {
     var l = peer.link;
+    var sampler = setInterval(function () {
+      if (l.ctl.readyState === 'open' || Date.now() - peer.added > 60000) { clearInterval(sampler); return; }
+      BoatLive.diag(l.pc).then(function (d) { peer.diagCore = d; });
+    }, 300);
     l.ctl.onopen = function () {
       peer.status = 'Connected'; peer.cls = 'ok'; peer.since = Date.now();
       flash('Phone connected.', 'ok');
@@ -338,7 +342,7 @@
     peers.forEach(function (p) {
       Object.keys(p.sent).forEach(function (n) { if (now - p.sent[n] > 5000) { p.missed++; delete p.sent[n]; } });
       if (p.link.ctl.readyState !== 'open' && Date.now() - (p.added || 0) < 120000) {
-        Promise.all([BoatLive.diag(p.link.pc), BoatLive.lnaState()]).then(function (r) {
+        Promise.all([p.diagCore ? Promise.resolve(p.diagCore) : BoatLive.diag(p.link.pc), BoatLive.lnaState()]).then(function (r) {
           var v = (navigator.userAgent.match(/(Edg|Chrome|Firefox|Version)\/(\d+)/) || []).slice(1).join(' ');
           p.diag = r[0] + ' · phone sent ' + p.phoneSent + ' · ' + v + ' · local network ' + r[1];
           renderPhones();

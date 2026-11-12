@@ -244,20 +244,25 @@
    * "to phone N, answered M, from phone K", plus the address kinds tried.
    */
   async function diag(pc) {
+    var m = pc.__diag || (pc.__diag = { sent: 0, resp: 0, recv: 0, loc: {}, rem: {}, ok: false, states: {} });
     try {
-      var sent = 0, resp = 0, recv = 0, loc = {}, rem = {}, ok = false;
+      var sent = 0, resp = 0, recv = 0, loc = m.loc, rem = m.rem, ok = m.ok;
       var st = await pc.getStats();
       st.forEach(function (s) {
         if (s.type === 'candidate-pair') {
           sent += s.requestsSent || 0; resp += s.responsesReceived || 0; recv += s.requestsReceived || 0;
           if (s.state === 'succeeded') ok = true;
+          if (s.state) m.states[s.state] = 1;
         } else if (s.type === 'local-candidate') {
           loc[(s.address || s.ip || '?') + (s.candidateType && s.candidateType !== 'host' ? ' (' + s.candidateType + ')' : '')] = 1;
         } else if (s.type === 'remote-candidate') {
           rem[(s.address || s.ip || '?') + (s.candidateType && s.candidateType !== 'host' ? ' (' + s.candidateType + ')' : '')] = 1;
         }
       });
+      m.sent = Math.max(m.sent, sent); m.resp = Math.max(m.resp, resp); m.recv = Math.max(m.recv, recv); m.ok = ok;
+      sent = m.sent; resp = m.resp; recv = m.recv;
       return 'checks: sent ' + sent + ', answered ' + resp + ', received ' + recv + (ok ? ', path found' : '') +
+        ' · link ' + pc.iceConnectionState + ' (' + Object.keys(m.states).join('/') + ')' +
         ' · here ' + Object.keys(loc).join(' ') + ' · there ' + Object.keys(rem).join(' ');
     } catch (e) { return ''; }
   }
