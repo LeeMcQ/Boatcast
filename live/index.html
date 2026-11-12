@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<title>Boatcast Live</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="live.css">
+<style>
+  .page { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; gap: 14px; }
+  h1 { font-size: 24px; margin: 0; }
+  #cam { width: 100%; max-width: 420px; border-radius: 12px; background: #000; }
+  #reply .qr { width: min(88vw, 62vh, 460px); }
+  #codeText { font: 12px/1.3 ui-monospace, monospace; word-break: break-all; color: #9aa1ad; max-width: 460px; }
+  #live { position: fixed; inset: 0; }
+  #live .slide { position: absolute; inset: 0; }
+  #pill { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); background: #b45309; color: #fff; padding: 6px 14px;
+    border-radius: 999px; font-size: 15px; z-index: 5; }
+  #lostBox { position: fixed; inset: 0; background: rgba(15, 17, 21, .94); z-index: 6; }
+</style>
+</head>
+<body>
+
+<section id="start" class="page">
+  <h1>Boatcast Live</h1>
+  <p class="quiet">Scan the code on the presenter's screen.</p>
+  <button id="scanBtn">Scan the presenter's code</button>
+  <video id="cam" class="hidden" playsinline muted></video>
+  <p id="startMsg" class="quiet small">Or point this phone's camera app at the code.</p>
+</section>
+
+<section id="busy" class="page hidden">
+  <p id="busyMsg">Connecting…</p>
+</section>
+
+<section id="reply" class="page hidden">
+  <h1>Show this to the presenter's camera</h1>
+  <div class="qr" id="replyQr"></div>
+  <p class="quiet small">Hold the phone still, screen facing the computer's camera, about 30 cm away. Turn the brightness up if it doesn't read.</p>
+  <p id="replyMsg" class="quiet small"></p>
+  <details class="small quiet"><summary>The code as text</summary><p id="codeText"></p></details>
+  <button class="ghost" id="rescanBtn">Scan the presenter's code again</button>
+</section>
+
+<section id="live" class="hidden">
+  <div class="slide" id="slide"></div>
+  <div id="pill" class="hidden"></div>
+</section>
+
+<section id="lostBox" class="page hidden">
+  <h1>Disconnected from the presenter</h1>
+  <p class="quiet">Scan the presenter's code again to rejoin.</p>
+  <button id="lostBtn">Scan again</button>
+</section>
+
+<script src="vendor/qrcode.min.js"></script>
+<script src="vendor/jsqr.min.js"></script>
+<script src="rtc.js"></script>
+<script src="show.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var screens = ['start', 'busy', 'reply', 'live'];
+  function show(name) { screens.forEach(function (s) { $(s).classList.toggle('hidden', s !== name); }); }
+
+  // the show
+  var deck = { v: 0, slides: [] }, assets = {}, cur = null, state = { slide: 0, blank: false, live: null }, lastSeq = -1;
+  var link = null, stream = null, stopScan = null, wake = null, openTimer = null;
+
+  function draw() {
+    var s = deck.slides[state.slide] || null;
+    BoatShow.render($('slide'), {
+      slide: s, url: s && s.img ? assets[s.img] || null : null, blank: state.blank, live: state.live,
+      waiting: deck.slides.length ? null : 'Connected. Waiting for the presenter…'
+    });
+  }
+  window.addEventListener('resize', function () { if (link) draw(); });
+
+  // ---- camera scanning in the page
+  function stopCamera() {
+    if (stopScan) { stopScan(); stopScan = null; }
+    BoatLive.stopStream(stream); stream = null;
+    $('cam').classList.add('hidden');
+  }
+  $('scanBtn').onclick = startScan;
+  $('rescanBtn').onclick = function () { closeLink(); show('start'); startScan(); };
+  $('lostBtn').onclick = function () { $('lostBox').classList.add('hidden'); closeLink(); show('start'); startScan(); };
+
+  async function startScan() {
+    show('start');
+    $('startMsg').textContent = 'Point the camera at the code on the presenter\'s screen.';
+    try {
+      stopCamera();
+      $('cam').classList.remove('hidden');
+      stream = await BoatLive.camera($('cam'), 'environment');
+      stopScan = BoatLive.scan($('cam'), function (text) {
+        var sig = BoatLive.unpack(text);
+        if (sig && sig.role === 'o') { stopCamera(); join(sig, true); }
+      });
+    } catch (e) {
+      stopCamera();
+      $('startMsg').textContent = 'The camera is not available here (' + (e.name || e.message) + '). Use the phone\'s camera app on the code instead.';
+    }
+  }
+
+  // ---- connecting
+  function closeLink() {
+    clearTimeout(openTimer);
+    if (link) { try { link.pc.close(); } catch (e) {} }
+    link = null;
+  }
+
+  // Browsers hide this phone's Wi-Fi address from pages without camera permission. If this
+  // page already has that permission (it scanned a code before), use it so the presenter's
+  // computer can reach the phone directly; otherwise the computer's own address is enough
+  // in most places, and "Scan again" (which uses the camera) is the fallback.
+  async function revealAddress() {
+    try {
+      var st = await navigator.permissions.query({ name: 'camera' });
+      if (st.state !== 'granted') return;
+      var s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      s.getTracks().forEach(function (t) { t.stop(); });
+    } catch (e) { /* not supported here: fine */ }
+  }
+
+  async function join(sig, fromScan) {
+    closeLink();
+    show('busy');
+    $('busyMsg').textContent = 'Preparing the reply code…';
+    var l;
+    try {
+      if (!fromScan) await revealAddress();
+      l = await BoatLive.answer(sig);
+    } catch (e) {
+      $('busyMsg').textContent = 'This code could not be used (' + e.message + '). Scan the presenter\'s code again.';
+      setTimeout(function () { show('start'); }, 4000);
+      return;
+    }
+    link = l;
+    $('replyQr').innerHTML = BoatLive.qrSvg(l.code);
+    $('codeText').textContent = l.code;
+    $('replyMsg').textContent = '';
+    show('reply');
+    // A presenter code can be used by one phone only; if another phone used it first, rescan.
+    openTimer = setTimeout(function () {
+      if (link === l && l.ctl.readyState !== 'open') {
+        $('replyMsg').textContent = 'Not connected yet. If the presenter\'s computer didn\'t beep or show this phone, scan the presenter\'s code again.';
+      }
+    }, 45000);
+
+    l.ctl.onopen = function () {
+      if (link !== l) return;
+      clearTimeout(openTimer);
+      lastSeq = -1;
+      l.ctl.send(JSON.stringify({ t: 'hi', ua: navigator.userAgent }));
+      $('lostBox').classList.add('hidden');
+      show('live');
+      draw();
+      keepAwake();
+    };
+    l.ctl.onmessage = function (ev) {
+      var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (m.t === 'p') { l.ctl.send(JSON.stringify({ t: 'q', n: m.n })); return; }
+      if (m.t === 's' && m.seq > lastSeq) {
+        lastSeq = m.seq;
+        state = { slide: m.slide | 0, blank: !!m.blank, live: m.live || null };
+        draw();
+      }
+    };
+    l.bulk.onmessage = function (ev) {
+      if (typeof ev.data !== 'string') {
+        if (!cur) return;
+        cur.parts.push(ev.data); cur.got += ev.data.byteLength;
+        if (cur.got >= cur.n) {
+          assets[cur.id] = URL.createObjectURL(new Blob(cur.parts, { type: cur.type }));
+          var s = deck.slides[state.slide];
+          var redraw = s && s.img === cur.id;
+          cur = null;
+          if (redraw) draw();
+        }
+        return;
+      }
+      var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (m.t === 'deck') { deck = { v: m.v, slides: m.slides || [] }; draw(); }
+      else if (m.t === 'a') {
+        if (assets[m.id]) { cur = null; return; }
+        cur = { id: m.id, type: m.type, n: m.n, got: 0, parts: [] };
+      }
+    };
+    l.ctl.onclose = function () { if (link === l) $('lostBox').classList.remove('hidden'); };
+    l.pc.onconnectionstatechange = function () {
+      if (link !== l) return;
+      var st = l.pc.connectionState;
+      $('pill').classList.toggle('hidden', st !== 'disconnected');
+      if (st === 'disconnected') $('pill').textContent = 'Weak connection… trying';
+      if ((st === 'failed' || st === 'closed') && !$('live').classList.contains('hidden')) $('lostBox').classList.remove('hidden');
+      if (st === 'failed' && $('live').classList.contains('hidden')) {
+        $('replyMsg').textContent = 'The connection failed. Check this phone is on the same Wi-Fi as the presenter (mobile data off), then scan again.';
+      }
+    };
+  }
+
+  // ---- keep the screen on while watching (needs a secure page; harmless if refused)
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator && !wake) { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', function () { wake = null; }); } } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && link) keepAwake(); });
+  $('slide').addEventListener('click', function () {
+    var d = document.documentElement;
+    if (!document.fullscreenElement && d.requestFullscreen) d.requestFullscreen().catch(function () {});
+  });
+
+  // ---- start: a presenter code in the address (from the phone's camera app), or scan
+  var sig = BoatLive.unpack(location.hash.slice(1));
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+  if (sig && sig.role === 'o') join(sig); else show('start');
+
+  if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(function () {});
+
+  // for automated tests
+  window.__viewer = { join: function (code) { return join(BoatLive.unpack(code)); }, code: function () { return link && link.code; },
+    state: function () { return { open: !!(link && link.ctl.readyState === 'open'), slide: state.slide, blank: state.blank, live: state.live, slides: deck.slides.length, assets: Object.keys(assets).length }; } };
+})();
+</script>
+</body>
+</html>

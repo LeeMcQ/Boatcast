@@ -1,0 +1,2 @@
+jsqr.min.js: jsQR 1.4.0 (https://github.com/cozmo/jsQR), Apache License 2.0, minified with terser.
+qrcode.min.js: qrcode-generator 1.4.4 by Kazuhiko Arase (https://github.com/kazuhikoarase/qrcode-generator), MIT License, minified with terser.

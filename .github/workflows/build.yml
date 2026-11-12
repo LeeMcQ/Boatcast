@@ -25,6 +25,19 @@ jobs:
       - run: cargo build --release
       - run: bash tests/smoke.sh
 
+  live:
+    name: Boatcast Live (no install) - 3 phones in Chrome, Firefox and Safari-engine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install playwright pillow
+      - run: python -m playwright install --with-deps chromium firefox webkit
+      - run: sudo apt-get install -y ffmpeg
+      - run: python tests/live.py chromium firefox webkit
+
   browsers:
     name: Viewer page in Chrome, Firefox and Safari-engine (WebKit)
     runs-on: ubuntu-latest

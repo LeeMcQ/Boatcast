@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f1115">
+<title>Boatcast Live · Presenter</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="live.css">
+<style>
+  header { padding: 12px 18px; border-bottom: 1px solid #252a34; display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+  header h1 { font-size: 20px; margin: 0; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 16px; padding: 16px; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+  .card { background: #181b22; border: 1px solid #252a34; border-radius: 14px; padding: 14px; }
+  .card h2 { font-size: 17px; margin: 0 0 10px; }
+  #qrBox { width: min(100%, 420px); margin: 0 auto; }
+  .steps { margin: 10px 0 0; padding-left: 22px; }
+  .steps li { margin: 4px 0; }
+  .camrow { display: flex; gap: 12px; align-items: flex-start; margin-top: 12px; }
+  #cam { width: 170px; aspect-ratio: 4 / 3; object-fit: cover; background: #000; border-radius: 10px; transform: scaleX(-1); flex: none; }
+  #camMsg { font-size: 15px; }
+  #flash { color: #4ade80; font-weight: 600; min-height: 1.4em; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+  input[type=text], textarea, select { background: #0f1115; color: #e8eaee; border: 1px solid #333a47; border-radius: 10px; padding: .55em .7em; }
+  input[type=text] { flex: 1; min-width: 0; }
+  textarea { width: 100%; min-height: 90px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 8px; }
+  td, th { text-align: left; padding: 6px 4px; border-bottom: 1px solid #252a34; }
+  .ok { color: #4ade80; } .warn { color: #fbbf24; } .bad { color: #f87171; }
+  #preview { aspect-ratio: 16 / 9; border-radius: 10px; }
+  #count { font-weight: 600; }
+  .ctl button { min-width: 92px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Boatcast Live · Presenter</h1>
+  <span class="quiet small">Runs in this browser. Nothing to install. Keep this tab open while presenting.</span>
+</header>
+<main>
+  <section class="card">
+    <h2>Phones join here</h2>
+    <div id="qrBox" class="qr"></div>
+    <ol class="steps small">
+      <li>Phones join the <b>same Wi-Fi</b> as this computer, with <b>mobile data off</b>.</li>
+      <li>Phone camera on this code. The Boatcast page opens with a reply code.</li>
+      <li>Hold the phone's reply code up to <b>this computer's camera</b>.</li>
+    </ol>
+    <div class="camrow">
+      <video id="cam" playsinline muted></video>
+      <div>
+        <div id="camMsg" class="quiet">Starting the camera…</div>
+        <div id="flash"></div>
+        <select id="camPick" class="hidden small"></select>
+      </div>
+    </div>
+    <details class="small" style="margin-top:10px"><summary class="quiet">No camera on this computer?</summary>
+      <div class="row"><input type="text" id="pasteIn" placeholder="Paste a phone's reply code (starts with B1,a,)"><button id="pasteBtn" class="ghost">Add</button></div>
+    </details>
+    <h2 style="margin-top:16px">Phones <span id="phoneCount" class="quiet">(0)</span></h2>
+    <table><thead><tr><th>Phone</th><th>Status</th><th>Delay</th><th>Slides</th></tr></thead><tbody id="phones"></tbody></table>
+    <p class="quiet small">Delay is checked every 2 seconds, there and back. Under 1000 ms is fine for slides.</p>
+  </section>
+
+  <section class="card">
+    <h2>Now showing <span id="count" class="quiet"></span></h2>
+    <div class="slide" id="preview"></div>
+    <div class="row ctl">
+      <button id="prevBtn" class="ghost">◀ Back</button>
+      <button id="nextBtn">Next ▶</button>
+      <button id="blankBtn" class="ghost">Blank</button>
+    </div>
+    <p class="quiet small">Keys: → or Space next, ← back, B blank.</p>
+    <div class="row"><input type="text" id="liveIn" placeholder="Line of text shown on every phone"><button id="liveBtn" class="ghost">Show text</button><button id="liveClr" class="ghost">Clear</button></div>
+
+    <h2 style="margin-top:18px">Slides</h2>
+    <div class="row">
+      <label class="ghost" style="background:#252a34;border-radius:10px;padding:.6em 1em;cursor:pointer;font-weight:600">
+        Choose pictures or a text file<input type="file" id="files" multiple accept="image/*,.txt,text/plain" class="hidden"></label>
+      <span class="quiet small">PowerPoint: File, Export, PNG, then pick all the slide pictures.</span>
+    </div>
+    <p class="quiet small" style="margin-bottom:4px">Or type slides: a blank line starts a new slide; a first line starting with # is its title.</p>
+    <textarea id="typed" placeholder="# Welcome&#10;Glad you are here&#10;&#10;# Notices&#10;Tea after the service"></textarea>
+    <div class="row"><button id="typedBtn" class="ghost">Use these slides</button><span id="deckMsg" class="quiet small"></span></div>
+  </section>
+</main>
+
+<script src="vendor/qrcode.min.js"></script>
+<script src="vendor/jsqr.min.js"></script>
+<script src="rtc.js"></script>
+<script src="show.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var viewerUrl = new URL('./', location.href).href; // the phone page sits beside this one
+
+  // ------------------------------------------------------------- the show
+  var deck = { v: 1, slides: BoatShow.fromText('# Welcome\nPhones are joining\n\n# Boatcast Live\nSlides on every phone'), assets: {} };
+  var show = { seq: 0, slide: 0, blank: false, live: null };
+  var localUrls = {};
+
+  function publicDeck() {
+    return { t: 'deck', v: deck.v, slides: deck.slides.map(function (s) { return { title: s.title, text: s.text, img: s.img }; }) };
+  }
+  function stateMsg() { return JSON.stringify({ t: 's', seq: show.seq, slide: show.slide, blank: show.blank, live: show.live }); }
+
+  function drawPreview() {
+    var s = deck.slides[show.slide] || null;
+    BoatShow.render($('preview'), { slide: s, url: s && s.img ? localUrls[s.img] : null, blank: show.blank, live: show.live, waiting: 'No slides yet' });
+    $('count').textContent = deck.slides.length ? (show.slide + 1) + ' / ' + deck.slides.length + (show.blank ? ' · blank' : '') : '';
+  }
+  function publish() {
+    show.seq++;
+    var m = stateMsg();
+    peers.forEach(function (p) { if (p.link.ctl.readyState === 'open') { try { p.link.ctl.send(m); } catch (e) {} } });
+    drawPreview();
+  }
+  function go(i) { show.slide = Math.max(0, Math.min(deck.slides.length - 1, i)); show.blank = false; publish(); }
+  $('nextBtn').onclick = function () { go(show.slide + 1); };
+  $('prevBtn').onclick = function () { go(show.slide - 1); };
+  $('blankBtn').onclick = function () { show.blank = !show.blank; publish(); };
+  $('liveBtn').onclick = function () { show.live = $('liveIn').value.trim() || null; publish(); };
+  $('liveClr').onclick = function () { $('liveIn').value = ''; show.live = null; publish(); };
+  document.addEventListener('keydown', function (e) {
+    if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); go(show.slide + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); go(show.slide - 1); }
+    else if (e.key === 'b' || e.key === 'B') { show.blank = !show.blank; publish(); }
+  });
+  window.addEventListener('resize', drawPreview);
+
+  // ------------------------------------------------------------- slides in
+  function hash(buf) {
+    var b = new Uint8Array(buf), h1 = 0x811c9dc5, h2 = 0x01000193 ^ b.length;
+    for (var i = 0; i < b.length; i++) { h1 = Math.imul(h1 ^ b[i], 16777619); h2 = Math.imul(h2 + b[i], 2246822519) ^ (h2 >>> 13); }
+    return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36);
+  }
+  // Pictures are resized to at most 1920 x 1080 and sent as JPEG: sharp on any phone, a
+  // fraction of the size of a PowerPoint PNG export.
+  async function shrink(file) {
+    var bmp = await createImageBitmap(file);
+    var k = Math.min(1, 1920 / bmp.width, 1080 / bmp.height);
+    var c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    var x = c.getContext('2d');
+    x.fillStyle = '#000'; x.fillRect(0, 0, c.width, c.height);
+    x.drawImage(bmp, 0, 0, c.width, c.height);
+    var blob = await new Promise(function (r) { c.toBlob(r, 'image/jpeg', 0.88); });
+    return { type: 'image/jpeg', buf: await blob.arrayBuffer() };
+  }
+  function natural(a, b) { return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }); }
+
+  function useDeck(slides, assets, msg) {
+    if (!slides.length) { $('deckMsg').textContent = 'No slides found there.'; return; }
+    deck = { v: deck.v + 1, slides: slides, assets: assets };
+    Object.keys(localUrls).forEach(function (k) { if (!assets[k]) { URL.revokeObjectURL(localUrls[k]); delete localUrls[k]; } });
+    Object.keys(assets).forEach(function (k) { if (!localUrls[k]) localUrls[k] = URL.createObjectURL(new Blob([assets[k].buf], { type: assets[k].type })); });
+    show.slide = 0; show.blank = false;
+    $('deckMsg').textContent = msg;
+    peers.forEach(sendDeck);
+    publish();
+  }
+  $('typedBtn').onclick = function () {
+    var s = BoatShow.fromText($('typed').value);
+    useDeck(s, {}, s.length + ' slide' + (s.length === 1 ? '' : 's') + ' ready.');
+  };
+  $('files').onchange = async function () {
+    var files = Array.prototype.slice.call(this.files).sort(natural), slides = [], assets = {}, bytes = 0;
+    $('deckMsg').textContent = 'Preparing ' + files.length + ' file(s)…';
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      try {
+        if (/^image\//.test(f.type)) {
+          var a = await shrink(f), id = hash(a.buf);
+          assets[id] = a; bytes += a.buf.byteLength;
+          slides.push({ title: f.name.replace(/\.[^.]+$/, ''), text: '', img: id });
+        } else {
+          slides = slides.concat(BoatShow.fromText(await f.text()));
+        }
+      } catch (e) {
+        $('deckMsg').textContent = 'Could not read ' + f.name + ': ' + e.message;
+        return;
+      }
+    }
+    this.value = '';
+    useDeck(slides, assets, slides.length + ' slides ready (' + (bytes / 1048576).toFixed(1) + ' MB of pictures for each phone).');
+  };
+
+  // ------------------------------------------------------------- phones
+  var pending = [], peers = [], shown = null, rotateTimer = null;
+
+  async function newOffer() {
+    try {
+      var p = await BoatLive.offer();
+      pending.push(p);
+      if (!shown || shown.used || Date.now() - shown.created > 9000) display(p);
+    } catch (e) {
+      $('camMsg').textContent = 'This browser could not start a link: ' + e.message;
+    }
+  }
+  function display(p) {
+    shown = p;
+    if (p) $('qrBox').innerHTML = BoatLive.qrSvg(viewerUrl + '#' + p.code);
+    else $('qrBox').innerHTML = '<div style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;color:#555;font:600 18px system-ui">Next code…</div>';
+  }
+  // The code on screen was just used: show a spare one at once (one is always kept ready).
+  function replaceShown() {
+    var spare = pending.filter(function (x) { return !x.used; }).pop();
+    display(spare || null);
+    newOffer();
+  }
+  // A code pairs with one phone. A fresh code appears every 10 seconds and after each
+  // phone joins; codes stay valid for 2 minutes, so a phone that scanned a moment ago still gets in.
+  function rotate() {
+    var now = Date.now();
+    pending = pending.filter(function (p) {
+      if (!p.used && now - p.created > 120000) { try { p.pc.close(); } catch (e) {} return false; }
+      return !p.used;
+    });
+    newOffer();
+  }
+
+  function flash(text, cls) {
+    $('flash').textContent = text;
+    $('flash').className = cls || '';
+    clearTimeout(flash.t);
+    flash.t = setTimeout(function () { $('flash').textContent = ''; }, 6000);
+  }
+
+  async function onReply(text) {
+    var sig = BoatLive.unpack(text);
+    if (!sig) return;
+    if (sig.role !== 'a') { flash('That is this computer\'s own code. Show the phone\'s reply code instead.', 'warn'); return; }
+    if (peers.some(function (q) { return q.id === sig.id; })) return; // read the same reply twice
+    var p = pending.filter(function (x) { return x.id === sig.id; })[0];
+    if (!p) { flash('That reply is from an old code. On the phone, tap "Scan the presenter\'s code again".', 'warn'); return; }
+    p.used = true;
+    var peer = { id: p.id, link: p, label: 'Phone', status: 'Connecting…', cls: 'warn', rtt: [], sent: {}, missed: 0, pics: 0, picsOf: 0, n: 0 };
+    peers.push(peer);
+    hook(peer);
+    try {
+      await BoatLive.accept(p, sig);
+    } catch (e) {
+      peer.status = 'Reply not accepted: ' + e.message; peer.cls = 'bad';
+    }
+    if (shown === p) replaceShown();
+    renderPhones();
+    setTimeout(function () {
+      if (peer.link.ctl.readyState !== 'open' && peer.cls !== 'bad') {
+        peer.status = 'Could not reach it. Same Wi-Fi? Mobile data off?'; peer.cls = 'bad'; renderPhones();
+      }
+    }, 20000);
+  }
+
+  function hook(peer) {
+    var l = peer.link;
+    l.ctl.onopen = function () {
+      peer.status = 'Connected'; peer.cls = 'ok'; peer.since = Date.now();
+      flash('Phone connected.', 'ok');
+      beep();
+      l.ctl.send(stateMsg());
+      sendDeck(peer);
+      renderPhones();
+    };
+    l.ctl.onmessage = function (ev) {
+      var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (m.t === 'hi') { peer.label = BoatLive.label(m.ua); renderPhones(); }
+      if (m.t === 'q' && peer.sent[m.n]) {
+        peer.rtt.push(performance.now() - peer.sent[m.n]);
+        if (peer.rtt.length > 60) peer.rtt.shift();
+        delete peer.sent[m.n];
+      }
+    };
+    l.ctl.onclose = function () { if (peer.cls !== 'bad') { peer.status = 'Left'; peer.cls = 'bad'; renderPhones(); } };
+    l.pc.onconnectionstatechange = function () {
+      var st = l.pc.connectionState;
+      if (st === 'disconnected') { peer.status = 'Weak signal…'; peer.cls = 'warn'; }
+      else if (st === 'connected' && l.ctl.readyState === 'open') { peer.status = 'Connected'; peer.cls = 'ok'; }
+      else if (st === 'failed') { peer.status = 'Lost. It can scan again to rejoin.'; peer.cls = 'bad'; }
+      renderPhones();
+    };
+  }
+
+  // Slides go on the "bulk" channel, a few at a time, so slide changes on "ctl" stay instant.
+  async function sendDeck(peer) {
+    var l = peer.link, token = {};
+    peer.token = token;
+    if (l.bulk.readyState !== 'open') {
+      l.bulk.onopen = function () { if (peer.token === token) { peer.token = null; sendDeck(peer); } };
+      return;
+    }
+    var d = deck, ids = [];
+    d.slides.forEach(function (s) { if (s.img && ids.indexOf(s.img) < 0) ids.push(s.img); });
+    // the slide on screen first, then the ones after it
+    ids.sort(function (a, b) { return order(a) - order(b); });
+    function order(id) { for (var i = 0; i < d.slides.length; i++) if (d.slides[i].img === id) return (i - show.slide + d.slides.length) % d.slides.length; return 0; }
+    peer.pics = 0; peer.picsOf = ids.length;
+    try {
+      l.bulk.send(JSON.stringify(publicDeck()));
+      for (var i = 0; i < ids.length; i++) {
+        var a = d.assets[ids[i]];
+        if (peer.token !== token || d !== deck || l.bulk.readyState !== 'open') return;
+        l.bulk.send(JSON.stringify({ t: 'a', id: ids[i], type: a.type, n: a.buf.byteLength }));
+        for (var off = 0; off < a.buf.byteLength; off += 16384) {
+          await BoatLive.drain(l.bulk);
+          if (l.bulk.readyState !== 'open') return;
+          l.bulk.send(a.buf.slice(off, off + 16384));
+        }
+        peer.pics = i + 1;
+        renderPhones();
+      }
+    } catch (e) { /* phone left mid-way */ }
+    renderPhones();
+  }
+
+  // Delivery check: every phone answers a small message every 2 seconds.
+  setInterval(function () {
+    var now = performance.now();
+    peers.forEach(function (p) {
+      Object.keys(p.sent).forEach(function (n) { if (now - p.sent[n] > 5000) { p.missed++; delete p.sent[n]; } });
+      if (p.link.ctl.readyState === 'open') {
+        p.n++; p.sent[p.n] = now;
+        try { p.link.ctl.send(JSON.stringify({ t: 'p', n: p.n })); } catch (e) {}
+      }
+    });
+    renderPhones();
+  }, 2000);
+
+  function renderPhones() {
+    var live = peers.filter(function (p) { return p.cls === 'ok'; }).length;
+    $('phoneCount').textContent = '(' + live + ' connected)';
+    $('phones').innerHTML = '';
+    peers.slice().reverse().forEach(function (p) {
+      var tr = document.createElement('tr'), sorted = p.rtt.slice().sort(function (a, b) { return a - b; });
+      var mid = sorted.length ? Math.round(sorted[sorted.length >> 1]) : null, worst = sorted.length ? Math.round(sorted[sorted.length - 1]) : null;
+      var delay = mid == null ? '–' : mid + ' ms (worst ' + worst + ')' + (p.missed ? ', ' + p.missed + ' missed' : '');
+      var dcls = mid == null ? '' : p.missed || worst > 1000 ? 'warn' : 'ok';
+      var pics = p.picsOf ? p.pics + '/' + p.picsOf + ' pictures' : 'text';
+      [p.label, p.status, delay, pics].forEach(function (t, i) {
+        var td = document.createElement('td');
+        td.textContent = t;
+        if (i === 1) td.className = p.cls;
+        if (i === 2) td.className = dcls;
+        tr.appendChild(td);
+      });
+      $('phones').appendChild(tr);
+    });
+  }
+
+  // ------------------------------------------------------------- the camera that reads reply codes
+  var stream = null, stopScan = null;
+  async function startCamera(deviceId) {
+    if (stopScan) stopScan();
+    BoatLive.stopStream(stream);
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } });
+      var v = $('cam');
+      v.srcObject = stream; await v.play().catch(function () {});
+      stopScan = BoatLive.scan(v, onReply);
+      $('camMsg').textContent = 'Camera on: waiting for a phone\'s reply code.';
+      var cams = (await navigator.mediaDevices.enumerateDevices()).filter(function (d) { return d.kind === 'videoinput'; });
+      if (cams.length > 1) {
+        var sel = $('camPick'); sel.classList.remove('hidden'); sel.innerHTML = '';
+        cams.forEach(function (c, i) { var o = document.createElement('option'); o.value = c.deviceId; o.textContent = c.label || 'Camera ' + (i + 1); sel.appendChild(o); });
+        var cur = stream.getVideoTracks()[0].getSettings().deviceId; if (cur) sel.value = cur;
+        sel.onchange = function () { startCamera(sel.value); };
+      }
+      return true;
+    } catch (e) {
+      $('camMsg').innerHTML = '';
+      $('camMsg').textContent = 'The camera is not available (' + (e.name || e.message) + '). Allow the camera for this page, or paste reply codes below.';
+      return false;
+    }
+  }
+  $('pasteBtn').onclick = function () { onReply($('pasteIn').value); $('pasteIn').value = ''; };
+
+  var ctx = null;
+  function beep() {
+    try {
+      ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+      var o = ctx.createOscillator(), gn = ctx.createGain();
+      o.frequency.value = 880; gn.gain.value = 0.08; o.connect(gn); gn.connect(ctx.destination);
+      o.start(); o.stop(ctx.currentTime + 0.12);
+    } catch (e) {}
+  }
+
+  // ------------------------------------------------------------- start
+  (async function () {
+    drawPreview();
+    if (!window.RTCPeerConnection) { $('camMsg').textContent = 'This browser cannot link to phones. Use Chrome, Edge, Firefox or Safari.'; return; }
+    // Camera first: with camera permission, browsers put this computer's real Wi-Fi address
+    // in the code, which makes the link work even where hidden addresses don't resolve.
+    await startCamera();
+    await newOffer();
+    newOffer(); // a spare, so the next phone never waits for a code
+    rotateTimer = setInterval(rotate, 10000);
+  })();
+  if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(function () {});
+
+  // for automated tests
+  window.__host = {
+    code: function () { return shown && !shown.used && shown.code; },
+    url: function () { return shown && !shown.used ? viewerUrl + '#' + shown.code : null; },
+    reply: onReply,
+    next: function () { go(show.slide + 1); },
+    go: go,
+    blank: function (b) { show.blank = !!b; publish(); },
+    text: function (t) { show.live = t || null; publish(); },
+    typed: function (t) { $('typed').value = t; $('typedBtn').click(); },
+    phones: function () { return peers.map(function (p) { return { label: p.label, status: p.status, rtt: p.rtt.slice(), missed: p.missed, pics: p.pics, picsOf: p.picsOf }; }); },
+    show: function () { return { slide: show.slide, slides: deck.slides.length }; },
+    restartCamera: function () { return startCamera(); }
+  };
+})();
+</script>
+</body>
+</html>
