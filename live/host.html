@@ -66,6 +66,7 @@
     <h2 style="margin-top:16px">Phones <span id="phoneCount" class="quiet">(0)</span></h2>
     <table><thead><tr><th>Phone</th><th>Status</th><th>Delay</th><th>Slides</th></tr></thead><tbody id="phones"></tbody></table>
     <p class="quiet small">Delay is checked every 2 seconds, there and back. Under 1000 ms is fine for slides.</p>
+    <p class="quiet" id="selfCheck" style="font-size:12px;word-break:break-all"></p>
   </section>
 
   <section class="card">
@@ -439,6 +440,10 @@
     // Camera first: with camera permission, browsers put this computer's real Wi-Fi address
     // in the code, which makes the link work even where hidden addresses don't resolve.
     await startCamera();
+    BoatLive.selfCheck().then(function (t) {
+      var v = (navigator.userAgent.match(/(Edg|Chrome|Firefox|Version)\/(\d+)/g) || []).join(' ');
+      $('selfCheck').textContent = t + ' · ' + v;
+    });
     await newOffer();
     newOffer(); // a spare, so the next phone never waits for a code
     rotateTimer = setInterval(rotate, 10000);

@@ -286,11 +286,44 @@
     return lnaState();
   }
 
+  /**
+   * Self-check: does this browser try addresses given by the other side? Makes a link
+   * with a made-up reply pointing at one private and one public address (nothing answers;
+   * only the attempts are counted). Returns a one-line summary.
+   */
+  async function selfCheck() {
+    var pc = new RTCPeerConnection({ iceServers: [] }), errs = [];
+    pc.addEventListener('icecandidateerror', function (e) { errs.push((e.errorCode || '') + ' ' + (e.errorText || '') + ' ' + (e.address || e.url || '')); });
+    try {
+      pc.createDataChannel('x', { negotiated: true, id: 0 });
+      await pc.setLocalDescription(await pc.createOffer());
+      await waitGathering(pc, 2500);
+      var fake = { ufrag: 'tEsT', pwd: 'abcdefghijklmnopqrstuvwx', setup: 'active',
+        fp: Array(32).fill('AB').join(':'), cands: [{ a: '192.168.137.250', p: '40000' }, { a: '8.8.8.8', p: '40001' }] };
+      await pc.setRemoteDescription({ type: 'answer', sdp: buildSdp(fake) });
+      await new Promise(function (r) { setTimeout(r, 3000); });
+      var pairs = 0, sent = 0, rem = [], loc = 0;
+      (await pc.getStats()).forEach(function (s) {
+        if (s.type === 'candidate-pair') { pairs++; sent += s.requestsSent || 0; }
+        if (s.type === 'remote-candidate') rem.push(s.address || s.ip);
+        if (s.type === 'local-candidate') loc++;
+      });
+      var rd = ((pc.currentRemoteDescription || {}).sdp || '').split('a=candidate').length - 1;
+      var cfg = pc.getConfiguration ? pc.getConfiguration().iceTransportPolicy : '?';
+      return 'self-check: local ' + loc + ', remote in reply ' + rd + ', remote used ' + (rem.join(' ') || 'none') +
+        ', pairs ' + pairs + ', attempts ' + sent + ', policy ' + cfg + (errs.length ? ', errors ' + errs.slice(0, 3).join(' | ') : '');
+    } catch (e) {
+      return 'self-check failed: ' + e.message;
+    } finally {
+      pc.close();
+    }
+  }
+
   var BLOCKED = 'Nothing got through between this phone and the computer. This Wi-Fi keeps devices apart ' +
     '(usual on work and guest Wi-Fi), or a firewall blocks it. Use a phone\'s hotspot as the Wi-Fi instead.';
 
   g.BoatLive = {
-    why: why, diag: diag, BLOCKED: BLOCKED, lnaState: lnaState, askLna: askLna,
+    why: why, diag: diag, selfCheck: selfCheck, BLOCKED: BLOCKED, lnaState: lnaState, askLna: askLna,
     pack: pack, unpack: unpack, buildSdp: buildSdp, offer: offer, accept: accept, answer: answer,
     drain: drain, qrSvg: qrSvg, camera: camera, scan: scan, stopStream: stopStream, label: label
   };
