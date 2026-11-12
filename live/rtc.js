@@ -221,7 +221,29 @@
     return os + ' · ' + br;
   }
 
+  /**
+   * Why a link failed, from the connection's own statistics: whether any test packet got
+   * through in either direction. Returns 'blocked' (nothing at all got through: the Wi-Fi
+   * keeps devices apart, or a firewall drops it), 'partial', or 'unknown'.
+   */
+  async function why(pc) {
+    try {
+      var heard = 0, answered = 0, pairs = 0;
+      (await pc.getStats()).forEach(function (s) {
+        if (s.type !== 'candidate-pair') return;
+        pairs++;
+        heard += s.requestsReceived || 0;
+        answered += s.responsesReceived || 0;
+      });
+      if (!pairs) return 'unknown';
+      return heard || answered ? 'partial' : 'blocked';
+    } catch (e) { return 'unknown'; }
+  }
+  var BLOCKED = 'Nothing got through between this phone and the computer. This Wi-Fi keeps devices apart ' +
+    '(usual on work and guest Wi-Fi), or a firewall blocks it. Use a phone\'s hotspot as the Wi-Fi instead.';
+
   g.BoatLive = {
+    why: why, BLOCKED: BLOCKED,
     pack: pack, unpack: unpack, buildSdp: buildSdp, offer: offer, accept: accept, answer: answer,
     drain: drain, qrSvg: qrSvg, camera: camera, scan: scan, stopStream: stopStream, label: label
   };

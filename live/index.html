@@ -200,6 +200,7 @@
       if ((st === 'failed' || st === 'closed') && !$('live').classList.contains('hidden')) $('lostBox').classList.remove('hidden');
       if (st === 'failed' && $('live').classList.contains('hidden')) {
         $('replyMsg').textContent = 'The connection failed. Check this phone is on the same Wi-Fi as the presenter (mobile data off), then scan again.';
+        BoatLive.why(l.pc).then(function (w) { if (w === 'blocked' && link === l) $('replyMsg').textContent = BoatLive.BLOCKED; });
       }
     };
   }

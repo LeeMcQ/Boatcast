@@ -251,6 +251,9 @@
     setTimeout(function () {
       if (peer.link.ctl.readyState !== 'open' && peer.cls !== 'bad') {
         peer.status = 'Could not reach it. Same Wi-Fi? Mobile data off?'; peer.cls = 'bad'; renderPhones();
+        BoatLive.why(peer.link.pc).then(function (w) {
+          if (w === 'blocked') { peer.status = 'Blocked: this Wi-Fi keeps devices apart. Use a phone\'s hotspot.'; flash(BoatLive.BLOCKED, 'bad'); renderPhones(); }
+        });
       }
     }, 20000);
   }
@@ -279,7 +282,12 @@
       var st = l.pc.connectionState;
       if (st === 'disconnected') { peer.status = 'Weak signal…'; peer.cls = 'warn'; }
       else if (st === 'connected' && l.ctl.readyState === 'open') { peer.status = 'Connected'; peer.cls = 'ok'; }
-      else if (st === 'failed') { peer.status = 'Lost. It can scan again to rejoin.'; peer.cls = 'bad'; }
+      else if (st === 'failed') {
+        peer.status = peer.since ? 'Lost. It can scan again to rejoin.' : 'Could not connect.'; peer.cls = 'bad';
+        if (!peer.since) BoatLive.why(l.pc).then(function (w) {
+          if (w === 'blocked') { peer.status = 'Blocked: this Wi-Fi keeps devices apart. Use a phone\'s hotspot.'; flash(BoatLive.BLOCKED, 'bad'); renderPhones(); }
+        });
+      }
       renderPhones();
     };
   }
